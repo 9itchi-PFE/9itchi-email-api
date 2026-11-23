@@ -1,0 +1,56 @@
+package router
+
+import (
+	"9itchi-email-api/handlers"
+	"9itchi-email-api/services"
+
+	"github.com/gin-gonic/gin"
+)
+
+func InitializeRouter(services *services.Services) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	initializeMiddlewares(r)
+	initializeRoutes(r, services)
+
+	return r
+}
+
+func initializeRoutes(r *gin.Engine, services *services.Services) {
+	// Health endpoints
+	r.GET("/", handlers.GetHealth)
+	r.GET("/health", handlers.GetHealth)
+
+	// public endpoints
+	{
+		r.GET("/gmail/callback", handlers.GmailCallback(services.Gmail))
+	}
+
+	// user endpoints
+	userGroup := r.Group("/")
+	userGroup.Use(AuthMiddleware())
+	{
+		userGroup.GET("/gmail/connect", handlers.ConnectGmail(services.Gmail))
+		userGroup.GET("/gmail/status", handlers.GmailStatus(services.Gmail))
+		userGroup.DELETE("/gmail/connection", handlers.RevokeGmail(services.Gmail))
+		userGroup.POST("/emails/draft", handlers.DraftEmail(services.Email))
+		userGroup.POST("/emails", handlers.SendEmail(services.Email))
+		userGroup.POST("/emails/schedule", handlers.ScheduleEmail(services.Email))
+		userGroup.GET("/emails", handlers.ListEmails(services.Email))
+		userGroup.GET("/emails/:id", handlers.GetEmail(services.Email))
+		userGroup.DELETE("/emails/:id", handlers.CancelEmail(services.Email))
+		userGroup.POST("/applications", handlers.Apply(services.Application))
+		userGroup.GET("/applications", handlers.ListApplications(services.Application))
+	}
+
+	// internal endpoints
+	internalGroup := r.Group("/")
+	internalGroup.Use(InternalAPIKeyMiddleware())
+	{
+		internalGroup.POST("/internal/emails/:id/dispatch", handlers.DispatchScheduled(services.Email))
+	}
+
+	// Fallback
+	r.NoRoute(handlers.NoRoute)
+}
