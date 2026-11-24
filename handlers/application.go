@@ -38,3 +38,32 @@ func ListApplications(svc services.ApplicationService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// UpdateApplication: PATCH /applications/:id (user) the student says what happened: replied, withdrawn, closed, sent.
+func UpdateApplication(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.UpdateApplicationRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.UpdateApplication(c.Request.Context(), c.GetString("user_id"), c.Param("id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// SendApplicationNow: POST /applications/:id/send (user) send a scheduled application right away.
+func SendApplicationNow(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.SendNow(c.Request.Context(), c.GetString("user_id"), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

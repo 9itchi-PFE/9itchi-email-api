@@ -39,6 +39,8 @@ type EmailService interface {
 	GetEmail(ctx context.Context, userID string, id string) (*db.Email, *models.ApiError)
 	// DELETE /emails/:id: cancel a scheduled email
 	CancelEmail(ctx context.Context, userID string, id string) (*db.Email, *models.ApiError)
+	// SendNow delivers a scheduled email of the user right away and drops its schedule task
+	SendNow(ctx context.Context, userID string, id string) (*db.Email, *models.ApiError)
 	// POST /internal/emails/:id/dispatch: called by schedule-api when due
 	DispatchScheduled(ctx context.Context, id string) (*db.Email, *models.ApiError)
 }
@@ -226,6 +228,31 @@ func (s *emailService) CancelEmail(ctx context.Context, userID, id string) (*db.
 		}
 	}
 	return e, nil
+}
+
+func (s *emailService) SendNow(ctx context.Context, userID, id string) (*db.Email, *models.ApiError) {
+	e, err := s.Repo.Get(ctx, userID, id)
+	if err != nil {
+		return nil, repoError(err, "email not found")
+	}
+	if e.Status != db.EmailScheduled {
+		return nil, apiError(http.StatusConflict, "only a scheduled email can be sent now")
+	}
+	// Checked before the email is claimed: with Gmail disconnected it stays scheduled instead of failing.
+	if _, _, apiErr := s.Gmail.Credentials(ctx, userID); apiErr != nil {
+		return nil, apiErr
+	}
+	out, apiErr := s.deliver(ctx, id)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	if e.ScheduleTaskID != nil {
+		// The dispatch of an email already sent is a no-op, so a failed cancel is only logged.
+		if err := s.Scheduler.Cancel(ctx, *e.ScheduleTaskID); err != nil {
+			utils.Logger.Logger.Warnw("email: could not cancel schedule task", "error", err)
+		}
+	}
+	return out, nil
 }
 
 func (s *emailService) DispatchScheduled(ctx context.Context, id string) (*db.Email, *models.ApiError) {

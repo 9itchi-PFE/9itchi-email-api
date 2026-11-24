@@ -51,7 +51,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	return &Services{
 		Gmail:       gmail,
 		Email:       emails,
-		Application: NewApplicationService(repos.Application, emails),
+		Application: NewApplicationService(repos.Application, emails, clients.Job),
 		Clients:     clients,
 	}
 }

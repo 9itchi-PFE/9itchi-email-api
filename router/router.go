@@ -42,6 +42,8 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.DELETE("/emails/:id", handlers.CancelEmail(services.Email))
 		userGroup.POST("/applications", handlers.Apply(services.Application))
 		userGroup.GET("/applications", handlers.ListApplications(services.Application))
+		userGroup.PATCH("/applications/:id", handlers.UpdateApplication(services.Application))
+		userGroup.POST("/applications/:id/send", handlers.SendApplicationNow(services.Application))
 	}
 
 	// internal endpoints
