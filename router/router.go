@@ -51,6 +51,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 	internalGroup.Use(InternalAPIKeyMiddleware())
 	{
 		internalGroup.POST("/internal/emails/:id/dispatch", handlers.DispatchScheduled(services.Email))
+		internalGroup.GET("/internal/emails/:id/context", handlers.EmailContext(services.Application))
 	}
 
 	// Fallback

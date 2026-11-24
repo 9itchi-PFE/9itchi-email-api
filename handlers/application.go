@@ -67,3 +67,15 @@ func SendApplicationNow(svc services.ApplicationService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// EmailContext: GET /internal/emails/:id/context (internal) the offer an email was sent for.
+func EmailContext(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.EmailContext(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

@@ -13,6 +13,8 @@ type ApplicationRepository interface {
 	ListByUser(ctx context.Context, userID string, limit int) ([]db.Application, error)
 	// GetByJob returns the application of userID to jobID (ErrNotFound when there is none).
 	GetByJob(ctx context.Context, userID, jobID string) (*db.Application, error)
+	// GetByEmail returns the application an email was sent for (ErrNotFound when it belongs to none).
+	GetByEmail(ctx context.Context, emailID string) (*db.Application, error)
 	// Get returns one application of userID (ErrNotFound otherwise).
 	Get(ctx context.Context, userID, id string) (*db.Application, error)
 	// SetStatus changes the status of one application of userID (ErrNotFound otherwise).
@@ -52,6 +54,13 @@ func (r *applicationRepository) GetByJob(ctx context.Context, userID, jobID stri
 	defer cancel()
 	return scanApplication(r.store.Conn(ctx).QueryRow(ctx,
 		`SELECT `+applicationColumns+` FROM applications WHERE user_id = $1 AND job_id = $2`, userID, jobID))
+}
+
+func (r *applicationRepository) GetByEmail(ctx context.Context, emailID string) (*db.Application, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanApplication(r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT `+applicationColumns+` FROM applications WHERE email_id = $1`, emailID))
 }
 
 func (r *applicationRepository) Get(ctx context.Context, userID, id string) (*db.Application, error) {

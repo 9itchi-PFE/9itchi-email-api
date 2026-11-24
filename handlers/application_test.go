@@ -29,6 +29,12 @@ func (m *mockApplications) Apply(_ context.Context, userID string, req api.Apply
 	}
 	return &api.ApplicationResponse{ID: "a1", JobID: req.JobID, Status: "sent", Via: "gmail"}, nil
 }
+func (m *mockApplications) EmailContext(_ context.Context, emailID string) (*api.EmailContextResponse, *models.ApiError) {
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	return &api.EmailContextResponse{EmailID: emailID, Company: "Acme", JobTitle: "Portail RH"}, nil
+}
 func (m *mockApplications) ListApplications(context.Context, string) (*api.ApplicationsResponse, *models.ApiError) {
 	if m.failing != nil {
 		return nil, m.failing
@@ -120,4 +126,16 @@ func TestSendApplicationNowHandler(t *testing.T) {
 	w = call(SendApplicationNow(&mockApplications{failing: &models.ApiError{Code: 409, Error: assert.AnError}}), http.MethodPost,
 		"/applications/:id/send", "/applications/a1/send", "")
 	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestEmailContextHandler(t *testing.T) {
+	w := call(EmailContext(&mockApplications{}), http.MethodGet, "/internal/emails/:id/context", "/internal/emails/e1/context", "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"email_id":"e1"`)
+	assert.Contains(t, w.Body.String(), `"company":"Acme"`)
+
+	w = call(EmailContext(&mockApplications{failing: &models.ApiError{Code: 404, Error: assert.AnError}}), http.MethodGet,
+		"/internal/emails/:id/context", "/internal/emails/e1/context", "")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), `"error"`)
 }

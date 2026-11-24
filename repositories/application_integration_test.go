@@ -36,6 +36,13 @@ func TestApplicationRepository(t *testing.T) {
 	assert.Equal(t, db.ViaGmail, b.Via)
 	assert.Equal(t, "Portail v2", b.JobTitle)
 
+	byEmail, err := repo.GetByEmail(ctx, emailID)
+	require.NoError(t, err)
+	assert.Equal(t, b.ID, byEmail.ID)
+	assert.Equal(t, "Acme", byEmail.Company)
+	_, err = repo.GetByEmail(ctx, "00000000-0000-0000-0000-0000000000ff")
+	assert.ErrorIs(t, err, ErrNotFound)
+
 	got, err := repo.GetByJob(ctx, user, job)
 	require.NoError(t, err)
 	assert.Equal(t, a.ID, got.ID)

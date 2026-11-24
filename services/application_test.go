@@ -56,6 +56,18 @@ func (m *memApps) GetByJob(_ context.Context, userID, job string) (*db.Applicati
 	}
 	return nil, repositories.ErrNotFound
 }
+func (m *memApps) GetByEmail(_ context.Context, emailID string) (*db.Application, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, a := range m.rows {
+		if a.EmailID != nil && *a.EmailID == emailID {
+			c := a
+			return &c, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
 func (m *memApps) Get(_ context.Context, userID, id string) (*db.Application, error) {
 	for _, a := range m.rows {
 		if a.UserID == userID && a.ID == id {
@@ -299,4 +311,26 @@ func TestShownStatus(t *testing.T) {
 	assert.Equal(t, db.AppWithdrawn, shownStatus(sched, &db.Email{Status: db.EmailCancelled}))
 	assert.Equal(t, db.AppReplied, shownStatus(&db.Application{Status: db.AppReplied, Via: db.ViaGmail}, &db.Email{Status: db.EmailSent}))
 	assert.Equal(t, db.AppSent, shownStatus(&db.Application{Status: db.AppSent, Via: db.ViaSelf}, nil))
+}
+
+func TestEmailContext(t *testing.T) {
+	const emailID = "00000000-0000-0000-0000-0000000000e1"
+	id := emailID
+	h := newApps(fakeJobs{})
+	h.apps.rows = []db.Application{{ID: appID, UserID: uid, JobID: jobID, EmailID: &id, JobTitle: "Portail RH", Company: "Acme"}}
+
+	res, apiErr := h.svc.EmailContext(context.Background(), emailID)
+	require.Nil(t, apiErr)
+	assert.Equal(t, &api.EmailContextResponse{EmailID: emailID, UserID: uid, ApplicationID: appID, JobID: jobID, JobTitle: "Portail RH", Company: "Acme"}, res)
+
+	_, apiErr = h.svc.EmailContext(context.Background(), "00000000-0000-0000-0000-0000000000e2")
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 404, apiErr.Code, "an email sent for no application")
+	_, apiErr = h.svc.EmailContext(context.Background(), "nope")
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 400, apiErr.Code)
+	h.apps.err = errors.New("database down")
+	_, apiErr = h.svc.EmailContext(context.Background(), emailID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 500, apiErr.Code)
 }
