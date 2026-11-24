@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -159,4 +160,27 @@ func TestCredentialsRefreshAndRevoke(t *testing.T) {
 	_, _, apiErr = svc.Credentials(context.Background(), uid)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 409, apiErr.Code)
+}
+
+func TestUserGmailStatusForTheTeam(t *testing.T) {
+	svc, _ := newGmail(&stubMailer{configured: true, exchange: &core.GoogleToken{AccessToken: "acc", RefreshToken: "ref", Expiry: time.Now().Add(time.Hour)}})
+	res, apiErr := svc.UserGmailStatus(context.Background(), uid)
+	require.Nil(t, apiErr)
+	assert.False(t, res.Connected)
+
+	_, apiErr = svc.GmailCallback(context.Background(), "code", stateOf(t, svc), "")
+	require.Nil(t, apiErr)
+	own, apiErr := svc.GmailStatus(context.Background(), uid)
+	require.Nil(t, apiErr)
+	assert.Equal(t, "me@gmail.com", own.Email)
+
+	res, apiErr = svc.UserGmailStatus(context.Background(), uid)
+	require.Nil(t, apiErr)
+	assert.True(t, res.Connected)
+	assert.NotNil(t, res.Since)
+	assert.Empty(t, res.Email, "the Gmail address is the student's own")
+
+	_, apiErr = svc.UserGmailStatus(context.Background(), "nope")
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 }

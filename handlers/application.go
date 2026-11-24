@@ -79,3 +79,15 @@ func EmailContext(svc services.ApplicationService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// UserApplications: GET /admin/users/:id/applications (admin) the applications of one student.
+func UserApplications(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.UserApplications(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
