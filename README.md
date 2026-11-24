@@ -19,6 +19,7 @@ Port `8085`, health `/health`.
 | GET | `/emails/:id` | user | GetEmail |
 | DELETE | `/emails/:id` | user | CancelEmail |
 | POST | `/internal/emails/:id/dispatch` | internal | DispatchScheduled |
+| GET | `/internal/emails/:id/context` | internal | EmailContext (the offer an email was sent for: `application_id`, `job_id`, `job_title`, `company`; 404 when it was sent for no application) |
 | POST | `/applications` | user | Apply (201) |
 | GET | `/applications` | user | ListApplications |
 | PATCH | `/applications/:id` | user | UpdateApplication |

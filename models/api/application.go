@@ -53,3 +53,13 @@ type ApplicationResponse struct {
 type ApplicationsResponse struct {
 	Items []ApplicationResponse `json:"items"`
 }
+
+// EmailContextResponse says what an email was sent for, so that a notification about it can name the offer.
+type EmailContextResponse struct {
+	EmailID       string `json:"email_id"`
+	UserID        string `json:"user_id"`
+	ApplicationID string `json:"application_id"`
+	JobID         string `json:"job_id"`
+	JobTitle      string `json:"job_title"`
+	Company       string `json:"company"`
+}

@@ -24,6 +24,8 @@ type ApplicationService interface {
 	UpdateApplication(ctx context.Context, userID, id string, req api.UpdateApplicationRequest) (*api.ApplicationResponse, *models.ApiError)
 	// POST /applications/:id/send: send a scheduled application now
 	SendNow(ctx context.Context, userID, id string) (*api.ApplicationResponse, *models.ApiError)
+	// GET /internal/emails/:id/context: the offer an email was sent for (peer services)
+	EmailContext(ctx context.Context, emailID string) (*api.EmailContextResponse, *models.ApiError)
 }
 
 type applicationService struct {
@@ -243,4 +245,15 @@ func (s *applicationService) SendNow(ctx context.Context, userID, id string) (*a
 		return nil, repoError(err, "application not found")
 	}
 	return toResponse(saved, sent), nil
+}
+
+func (s *applicationService) EmailContext(ctx context.Context, emailID string) (*api.EmailContextResponse, *models.ApiError) {
+	if !uuidRe.MatchString(emailID) {
+		return nil, apiError(http.StatusBadRequest, "invalid email id")
+	}
+	a, err := s.repo.GetByEmail(ctx, emailID)
+	if err != nil {
+		return nil, repoError(err, "no application was sent with this email")
+	}
+	return &api.EmailContextResponse{EmailID: emailID, UserID: a.UserID, ApplicationID: a.ID, JobID: a.JobID, JobTitle: a.JobTitle, Company: a.Company}, nil
 }
