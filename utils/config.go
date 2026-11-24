@@ -39,6 +39,7 @@ type AppConfig struct {
 
 // LoadConfig loads configuration from environment variables.
 func LoadConfig() AppConfig {
+	defer lockConfig()()
 	viper.AutomaticEnv()
 	return AppConfig{
 		Port:                   getIntWithDefault("PORT", 8085),
