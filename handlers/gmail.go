@@ -24,12 +24,12 @@ func ConnectGmail(svc services.GmailService) gin.HandlerFunc {
 // GmailCallback: GET /gmail/callback (public) finish OAuth2, store AES-GCM encrypted token.
 func GmailCallback(svc services.GmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		result, apiErr := svc.GmailCallback(c.Request.Context())
+		redirect, apiErr := svc.GmailCallback(c.Request.Context(), c.Query("code"), c.Query("state"), c.Query("error"))
 		if apiErr != nil {
 			models.FormatError(c, apiErr)
 			return
 		}
-		c.JSON(http.StatusOK, result)
+		c.Redirect(http.StatusFound, redirect)
 	}
 }
 

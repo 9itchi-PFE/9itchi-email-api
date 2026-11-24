@@ -1,7 +1,9 @@
 package services
 
 import (
+	"9itchi-email-api/core"
 	"9itchi-email-api/pkg/ai"
+	"9itchi-email-api/pkg/google"
 	"9itchi-email-api/pkg/job"
 	"9itchi-email-api/pkg/payments"
 	"9itchi-email-api/pkg/resume"
@@ -27,20 +29,29 @@ type Clients struct {
 	Tracker  *tracker.Client
 	Schedule *schedule.Client
 	Payments *payments.Client
+	Google   *google.Client
 }
 
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
+	clients := &Clients{
+		Ai:       ai.New(config.AiAPIURL, config.InternalAPIKey),
+		Resume:   resume.New(config.ResumeAPIURL, config.InternalAPIKey),
+		Job:      job.New(config.JobAPIURL, config.InternalAPIKey),
+		Tracker:  tracker.New(config.TrackerAPIURL, config.InternalAPIKey),
+		Schedule: schedule.New(config.ScheduleAPIURL, config.InternalAPIKey),
+		Payments: payments.New(config.PaymentsAPIURL, config.InternalAPIKey),
+		Google:   google.New(config.GoogleClientID, config.GoogleClientSecret, config.GoogleRedirectURL),
+	}
+	gmail := NewGmailService(repos.Gmail, clients.Google, config)
+	emails := NewEmailService(EmailDeps{
+		Repo: repos.Email, Gmail: gmail, Mailer: clients.Google, Drafter: clients.Ai, Jobs: clients.Job,
+		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
+		Events: core.LogPublisher{}, Config: config,
+	})
 	return &Services{
-		Gmail:       NewGmailService(repos.Gmail),
-		Email:       NewEmailService(repos.Email),
-		Application: NewApplicationService(repos.Application),
-		Clients: &Clients{
-			Ai:       ai.New(config.AiAPIURL, config.InternalAPIKey),
-			Resume:   resume.New(config.ResumeAPIURL, config.InternalAPIKey),
-			Job:      job.New(config.JobAPIURL, config.InternalAPIKey),
-			Tracker:  tracker.New(config.TrackerAPIURL, config.InternalAPIKey),
-			Schedule: schedule.New(config.ScheduleAPIURL, config.InternalAPIKey),
-			Payments: payments.New(config.PaymentsAPIURL, config.InternalAPIKey),
-		},
+		Gmail:       gmail,
+		Email:       emails,
+		Application: NewApplicationService(repos.Application, emails),
+		Clients:     clients,
 	}
 }

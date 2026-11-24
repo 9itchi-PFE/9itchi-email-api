@@ -27,6 +27,14 @@ type AppConfig struct {
 	TrackerAPIURL  string
 	ScheduleAPIURL string
 	PaymentsAPIURL string
+	// Gmail OAuth2 (Google Cloud client). GoogleRedirectURL must be registered in the Google console.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+	// ClientURL is where the browser lands after the Gmail callback.
+	ClientURL string
+	// TrackerPublicURL is the public base URL of the tracking pixel (opened by the recipient's mail client).
+	TrackerPublicURL string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -47,6 +55,11 @@ func LoadConfig() AppConfig {
 		TrackerAPIURL:          getStringWithDefault("TRACKER_API_URL", "http://9itchi-tracker-api:8086"),
 		ScheduleAPIURL:         getStringWithDefault("SCHEDULE_API_URL", "http://9itchi-schedule-api:8091"),
 		PaymentsAPIURL:         getStringWithDefault("PAYMENTS_API_URL", "http://9itchi-payments-api:8089"),
+		GoogleClientID:         getStringWithDefault("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:     getStringWithDefault("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:      getStringWithDefault("GMAIL_REDIRECT_URL", "http://localhost:8085/gmail/callback"),
+		ClientURL:              getStringWithDefault("CLIENT_URL", "http://localhost:3000"),
+		TrackerPublicURL:       getStringWithDefault("TRACKER_PUBLIC_URL", "http://localhost:8086"),
 	}
 }
 
