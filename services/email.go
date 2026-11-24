@@ -307,11 +307,16 @@ func (s *emailService) deliver(ctx context.Context, id string) (*db.Email, *mode
 	}
 	msg := core.MailMessage{From: from, To: e.Recipient, Subject: e.Subject, HTML: renderHTML(e.Body, pixel)}
 	if e.ResumeID != nil {
-		if pdf, err := s.Resumes.PDF(ctx, *e.ResumeID); err != nil {
-			utils.Logger.Logger.Warnw("email: resume pdf unavailable, sending without attachment", "error", err)
-		} else if pdf != nil {
-			msg.Attachment = &core.Attachment{Filename: "CV.pdf", Data: pdf}
+		// An application that says « CV attached » never leaves without it: better a failed send the student
+		// sees and retries than a recruiter who receives no CV.
+		pdf, err := s.Resumes.PDF(ctx, *e.ResumeID)
+		if err != nil || len(pdf) == 0 {
+			if err == nil {
+				err = errors.New("resume has no pdf")
+			}
+			return fail(apiError(http.StatusBadGateway, "the CV could not be attached"), err)
 		}
+		msg.Attachment = &core.Attachment{Filename: "CV.pdf", Data: pdf}
 	}
 	if err := s.Mailer.Send(ctx, accessToken, msg); err != nil {
 		if errors.Is(err, core.ErrGmailAuth) {

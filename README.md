@@ -31,6 +31,8 @@ Port `8085`, health `/health`.
 - `via: "gmail"` (default) with `subject` and `body`: the email leaves from the student's Gmail with the CV attached, now or at `scheduled_at`. The recipient is the address the offer takes applications at, read from job-api (`GET /internal/jobs/:id`); the browser never sees it. `to` is only used when the offer has none. `422` when there is no address at all.
 - `via: "self"`: nothing is sent; the application is only recorded (the student applied on another site or from their own mailbox).
 
+The CV is the one resume-api renders at that moment (`GET /internal/resumes/:id/pdf`); when it cannot be attached the email is not sent (`502`, a scheduled one becomes `failed`).
+
 One live application per offer: `409` when one is already scheduled, sent or answered, and when the offer is closed. `409` also when Gmail is not connected, `402` when the plan's monthly email limit is reached.
 
 Each application keeps the `job_title` and `company` of its offer (offers are removed once expired) and its channel `via`. Its `status` is `scheduled`, `sent`, `opened`, `replied`, `withdrawn`, `closed`, or `failed` when a scheduled email could not leave.

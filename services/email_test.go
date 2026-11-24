@@ -145,12 +145,15 @@ func (f fakeTracker) Register(context.Context, string, string) (string, string, 
 	return "track-1", "/t/track-1", f.err
 }
 
-type fakeResumes struct{ pdf []byte }
+type fakeResumes struct {
+	pdf []byte
+	err error
+}
 
 func (f fakeResumes) Summary(context.Context, string, string) (string, error) {
 	return "Ines, ENIS", nil
 }
-func (f fakeResumes) PDF(context.Context, string) ([]byte, error) { return f.pdf, nil }
+func (f fakeResumes) PDF(context.Context, string) ([]byte, error) { return f.pdf, f.err }
 
 type fakeJobs struct {
 	err  error
@@ -425,4 +428,27 @@ func TestSendNowGmailNotConnected(t *testing.T) {
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 409, apiErr.Code)
 	assert.Equal(t, db.EmailScheduled, h.repo.rows[e.ID].Status, "the email stays scheduled")
+}
+
+func TestSendEmailNeverLeavesWithoutItsCV(t *testing.T) {
+	for name, resumes := range map[string]fakeResumes{"no pdf": {}, "resume-api down": {err: core.ErrPeerUnavailable}} {
+		h := newHarness(nil, unlimited)
+		svc := NewEmailService(EmailDeps{
+			Repo: h.repo, Gmail: fakeGmail{}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
+			Resumes: resumes, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: unlimited, Config: testCfg,
+		})
+		e, apiErr := svc.SendEmail(context.Background(), uid, sendReq())
+		require.NotNil(t, apiErr, name)
+		assert.Equal(t, 502, apiErr.Code, name)
+		assert.Equal(t, db.EmailFailed, e.Status, name)
+		assert.Empty(t, h.mailer.sent, name)
+
+		// Without a chosen CV the email is a plain email and leaves.
+		req := sendReq()
+		req.ResumeID = ""
+		_, apiErr = svc.SendEmail(context.Background(), uid, req)
+		require.Nil(t, apiErr, name)
+		require.Len(t, h.mailer.sent, 1, name)
+		assert.Nil(t, h.mailer.sent[0].Attachment, name)
+	}
 }
