@@ -46,7 +46,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	emails := NewEmailService(EmailDeps{
 		Repo: repos.Email, Gmail: gmail, Mailer: clients.Google, Drafter: clients.Ai, Jobs: clients.Job,
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
-		Events: core.LogPublisher{}, Config: config,
+		Events: core.NewPublisher(config.RabbitMQURL), Config: config,
 	})
 	return &Services{
 		Gmail:       gmail,

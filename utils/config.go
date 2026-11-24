@@ -49,7 +49,7 @@ func LoadConfig() AppConfig {
 		EncryptionKey:          getStringWithDefault("ITCHI_ENCRYPTION_KEY", ""),
 		InternalAPIKey:         getStringWithDefault("INTERNAL_API_KEY", ""),
 		InternalAPIKeyRequired: getBoolWithDefault("INTERNAL_API_KEY_REQUIRED", true),
-		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
+		RabbitMQURL:            getStringWithDefault("RABBITMQ_URL", ""),
 		AiAPIURL:               getStringWithDefault("AI_API_URL", "http://9itchi-ai-api:8083"),
 		ResumeAPIURL:           getStringWithDefault("RESUME_API_URL", "http://9itchi-resume-api:8082"),
 		JobAPIURL:              getStringWithDefault("JOB_API_URL", "http://9itchi-job-api:8084"),

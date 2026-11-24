@@ -170,7 +170,7 @@ func (s *emailService) SendEmail(ctx context.Context, userID string, req api.Sen
 	if apiErr != nil {
 		return nil, apiErr
 	}
-	return s.deliver(ctx, e.ID)
+	return s.deliver(ctx, e.ID, false)
 }
 
 func (s *emailService) ScheduleEmail(ctx context.Context, userID string, req api.ScheduleEmailRequest) (*db.Email, *models.ApiError) {
@@ -242,7 +242,7 @@ func (s *emailService) SendNow(ctx context.Context, userID, id string) (*db.Emai
 	if _, _, apiErr := s.Gmail.Credentials(ctx, userID); apiErr != nil {
 		return nil, apiErr
 	}
-	out, apiErr := s.deliver(ctx, id)
+	out, apiErr := s.deliver(ctx, id, false)
 	if apiErr != nil {
 		return nil, apiErr
 	}
@@ -263,7 +263,7 @@ func (s *emailService) DispatchScheduled(ctx context.Context, id string) (*db.Em
 	if e.Status != db.EmailScheduled {
 		return e, nil
 	}
-	out, apiErr := s.deliver(ctx, id)
+	out, apiErr := s.deliver(ctx, id, true)
 	if out == nil {
 		if apiErr.Code == http.StatusConflict {
 			// Claimed by a concurrent dispatch: nothing left to do.
@@ -276,7 +276,9 @@ func (s *emailService) DispatchScheduled(ctx context.Context, id string) (*db.Em
 }
 
 // deliver sends one draft/scheduled email through Gmail and records the outcome.
-func (s *emailService) deliver(ctx context.Context, id string) (*db.Email, *models.ApiError) {
+// scheduled says the scheduler is sending it: the events carry it, so that only an email sent while the student was
+// away becomes a notification.
+func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (*db.Email, *models.ApiError) {
 	e, err := s.Repo.Claim(ctx, id)
 	if errors.Is(err, repositories.ErrNotFound) {
 		return nil, apiError(http.StatusConflict, "email is not pending")
@@ -287,7 +289,7 @@ func (s *emailService) deliver(ctx context.Context, id string) (*db.Email, *mode
 	fail := func(apiErr *models.ApiError, cause error) (*db.Email, *models.ApiError) {
 		utils.Logger.Logger.Warnw("email delivery failed", "email_id", e.ID, "error", cause)
 		_ = s.Repo.Finish(ctx, e.ID, db.EmailFailed, nil)
-		_ = s.Events.Publish(ctx, core.EventEmailFailed, map[string]string{"email_id": e.ID, "user_id": e.UserID})
+		s.publish(ctx, core.EventEmailFailed, e, scheduled)
 		e.Status = db.EmailFailed
 		return e, apiErr
 	}
@@ -328,7 +330,7 @@ func (s *emailService) deliver(ctx context.Context, id string) (*db.Email, *mode
 	if err := s.Repo.Finish(ctx, e.ID, db.EmailSent, &sentAt); err != nil {
 		utils.Logger.Logger.Warnw("email: sent but status not stored", "email_id", e.ID, "error", err)
 	}
-	_ = s.Events.Publish(ctx, core.EventEmailSent, map[string]string{"email_id": e.ID, "user_id": e.UserID})
+	s.publish(ctx, core.EventEmailSent, e, scheduled)
 	e.Status, e.SentAt = db.EmailSent, &sentAt
 	return e, nil
 }
@@ -345,4 +347,12 @@ func renderHTML(body, pixel string) string {
 		}
 	}
 	return b.String()
+}
+
+// publish raises an event about an email. A failure is logged and never changes what happened to the email.
+func (s *emailService) publish(ctx context.Context, event string, e *db.Email, scheduled bool) {
+	payload := map[string]any{"email_id": e.ID, "user_id": e.UserID, "scheduled": scheduled}
+	if err := s.Events.Publish(ctx, event, payload); err != nil {
+		utils.Logger.Logger.Warnw("publish event", "event", event, "email_id", e.ID, "error", err)
+	}
 }

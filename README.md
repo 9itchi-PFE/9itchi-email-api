@@ -40,6 +40,12 @@ Each application keeps the `job_title` and `company` of its offer (offers are re
 - `PATCH /applications/:id` `{"status": "replied" | "withdrawn" | "closed" | "sent"}`: what the student says happened. Withdrawing a scheduled application cancels its email; any other change waits until it is sent (`409`).
 - `POST /applications/:id/send`: sends a scheduled application now and drops its schedule task.
 
+## Events (RabbitMQ)
+
+Optional. With `RABBITMQ_URL` set, `email.sent` and `email.failed` (`email_id`, `user_id`, `scheduled`: true when the scheduler sent it, false when the student clicked) are published to the topic exchange `9itchi.events` (routing key = event name) as persistent JSON messages, each confirmed by the broker and carrying a message id consumers deduplicate on. Without the variable the event name is only logged.
+
+A publish failure is logged and never fails the request. A broker that cannot be reached is left alone for 15 s, so it costs one short wait and not one per request; events raised meanwhile are lost (there is no outbox). Broker tests: `RABBITMQ_TEST_URL=amqp://guest:guest@localhost:5672/ go test -tags integration ./core/` (skipped without the variable).
+
 ## Run
 
 ```

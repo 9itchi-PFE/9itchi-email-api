@@ -220,13 +220,32 @@ type harness struct {
 	mailer *fakeMailer
 	sched  *fakeScheduler
 	draft  *fakeDrafter
+	events *recordedEvents
+}
+
+// recordedEvents keeps what the service published, and can fail like a broker that is down.
+type recordedEvents struct {
+	got []publishedEvent
+	err error
+}
+
+type publishedEvent struct {
+	name    string
+	payload map[string]any
+}
+
+func (r *recordedEvents) Publish(_ context.Context, name string, payload any) error {
+	p, _ := payload.(map[string]any)
+	r.got = append(r.got, publishedEvent{name, p})
+	return r.err
 }
 
 func newHarness(gmailErr *models.ApiError, quota fakeQuota) *harness {
-	h := &harness{repo: newMemEmails(), mailer: &fakeMailer{}, sched: &fakeScheduler{}, draft: &fakeDrafter{}}
+	h := &harness{repo: newMemEmails(), mailer: &fakeMailer{}, sched: &fakeScheduler{}, draft: &fakeDrafter{}, events: &recordedEvents{}}
 	h.svc = NewEmailService(EmailDeps{
 		Repo: h.repo, Gmail: fakeGmail{err: gmailErr}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
 		Resumes: fakeResumes{pdf: []byte("%PDF")}, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: quota,
+		Events: h.events,
 		Config: testCfg, Now: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	})
 	return h
@@ -451,4 +470,50 @@ func TestSendEmailNeverLeavesWithoutItsCV(t *testing.T) {
 		require.Len(t, h.mailer.sent, 1, name)
 		assert.Nil(t, h.mailer.sent[0].Attachment, name)
 	}
+}
+
+// The events say who sent the email: only one sent by the scheduler becomes a notification downstream.
+func TestEmailEventsSayWhetherTheSchedulerSentIt(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	require.Len(t, h.events.got, 1)
+	assert.Equal(t, core.EventEmailSent, h.events.got[0].name)
+	assert.Equal(t, map[string]any{"email_id": e.ID, "user_id": uid, "scheduled": false}, h.events.got[0].payload)
+
+	at := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
+	later, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+	assert.Len(t, h.events.got, 1, "scheduling sends nothing yet")
+	_, apiErr = h.svc.DispatchScheduled(context.Background(), later.ID)
+	require.Nil(t, apiErr)
+	require.Len(t, h.events.got, 2)
+	assert.Equal(t, map[string]any{"email_id": later.ID, "user_id": uid, "scheduled": true}, h.events.got[1].payload)
+
+	clicked, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+	_, apiErr = h.svc.SendNow(context.Background(), uid, clicked.ID)
+	require.Nil(t, apiErr)
+	require.Len(t, h.events.got, 3)
+	assert.Equal(t, false, h.events.got[2].payload["scheduled"], "« send now » is the student's own click")
+}
+
+func TestEmailFailureEventAndBrokerDown(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	at := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
+	e, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+	h.mailer.err = errors.New("boom")
+	_, _ = h.svc.DispatchScheduled(context.Background(), e.ID)
+	assert.Equal(t, db.EmailFailed, h.repo.rows[e.ID].Status)
+	require.Len(t, h.events.got, 1)
+	assert.Equal(t, core.EventEmailFailed, h.events.got[0].name)
+	assert.Equal(t, true, h.events.got[0].payload["scheduled"])
+
+	// A broker that is down never changes what happened to the email.
+	h = newHarness(nil, unlimited)
+	h.events.err = errors.New("rabbitmq: broker unreachable")
+	sent, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.Equal(t, db.EmailSent, sent.Status)
 }
