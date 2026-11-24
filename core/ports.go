@@ -71,11 +71,17 @@ type JobInfo struct {
 	Title       string
 	Company     string
 	Description string
+	// ApplyEmail is where the offer takes applications; empty when it only takes them elsewhere.
+	ApplyEmail string
+	// Open is false once the deadline of the offer has passed.
+	Open bool
 }
 
 // JobSource calls 9itchi-job-api.
 type JobSource interface {
 	Job(ctx context.Context, bearer, id string) (*JobInfo, error)
+	// ApplyInfo is the internal view of a published offer, with the recruiter's address.
+	ApplyInfo(ctx context.Context, id string) (*JobInfo, error)
 }
 
 // ResumeSource calls 9itchi-resume-api.

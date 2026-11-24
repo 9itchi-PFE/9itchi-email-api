@@ -41,7 +41,7 @@ type stubMailer struct {
 	revoked    []string
 }
 
-func (s *stubMailer) Configured() bool       { return s.configured }
+func (s *stubMailer) Configured() bool         { return s.configured }
 func (s *stubMailer) AuthURL(st string) string { return "https://google/auth?state=" + st }
 func (s *stubMailer) Exchange(context.Context, string) (*core.GoogleToken, error) {
 	return s.exchange, s.exchErr
@@ -50,7 +50,10 @@ func (s *stubMailer) Refresh(context.Context, string) (*core.GoogleToken, error)
 	return s.refreshed, s.refreshErr
 }
 func (s *stubMailer) UserEmail(context.Context, string) (string, error) { return "me@gmail.com", nil }
-func (s *stubMailer) Revoke(_ context.Context, t string) error         { s.revoked = append(s.revoked, t); return nil }
+func (s *stubMailer) Revoke(_ context.Context, t string) error {
+	s.revoked = append(s.revoked, t)
+	return nil
+}
 
 func newGmail(m *stubMailer) (GmailService, *memGmail) {
 	repo := &memGmail{}

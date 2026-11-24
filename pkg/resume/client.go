@@ -75,7 +75,7 @@ func (c *Client) Summary(ctx context.Context, bearer, id string) (string, error)
 	return b.String(), nil
 }
 
-// PDF calls GET /internal/resumes/:id/pdf. It returns nil when the CV has no exported PDF.
+// PDF calls GET /internal/resumes/:id/pdf: the CV as it is now. It returns nil when the CV does not exist.
 func (c *Client) PDF(ctx context.Context, id string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpx.URL(c.BaseURL, "/internal/resumes/"+url.PathEscape(id)+"/pdf"), nil)
 	if err != nil {

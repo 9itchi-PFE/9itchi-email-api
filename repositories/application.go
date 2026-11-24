@@ -11,6 +11,12 @@ type ApplicationRepository interface {
 	// Upsert creates the application of (user, job) or relinks it to the new email.
 	Upsert(ctx context.Context, a *db.Application) (*db.Application, error)
 	ListByUser(ctx context.Context, userID string, limit int) ([]db.Application, error)
+	// GetByJob returns the application of userID to jobID (ErrNotFound when there is none).
+	GetByJob(ctx context.Context, userID, jobID string) (*db.Application, error)
+	// Get returns one application of userID (ErrNotFound otherwise).
+	Get(ctx context.Context, userID, id string) (*db.Application, error)
+	// SetStatus changes the status of one application of userID (ErrNotFound otherwise).
+	SetStatus(ctx context.Context, userID, id, status string) (*db.Application, error)
 }
 
 type applicationRepository struct {
@@ -21,11 +27,11 @@ func NewApplicationRepository(store *Store) ApplicationRepository {
 	return &applicationRepository{store: store}
 }
 
-const applicationColumns = `id, user_id, job_id, email_id, status, created_at, updated_at`
+const applicationColumns = `id, user_id, job_id, email_id, status, job_title, company, via, created_at, updated_at`
 
 func scanApplication(r rowScanner) (*db.Application, error) {
 	var a db.Application
-	if err := r.Scan(&a.ID, &a.UserID, &a.JobID, &a.EmailID, &a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	if err := r.Scan(&a.ID, &a.UserID, &a.JobID, &a.EmailID, &a.Status, &a.JobTitle, &a.Company, &a.Via, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, MapError(err)
 	}
 	return &a, nil
@@ -35,9 +41,32 @@ func (r *applicationRepository) Upsert(ctx context.Context, a *db.Application) (
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanApplication(r.store.Conn(ctx).QueryRow(ctx, `
-		INSERT INTO applications (user_id, job_id, email_id, status) VALUES ($1, $2, $3, $4)
-		ON CONFLICT (user_id, job_id) DO UPDATE SET email_id = EXCLUDED.email_id, status = EXCLUDED.status, updated_at = now()
-		RETURNING `+applicationColumns, a.UserID, a.JobID, a.EmailID, a.Status))
+		INSERT INTO applications (user_id, job_id, email_id, status, job_title, company, via) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (user_id, job_id) DO UPDATE SET email_id = EXCLUDED.email_id, status = EXCLUDED.status,
+			job_title = EXCLUDED.job_title, company = EXCLUDED.company, via = EXCLUDED.via, updated_at = now()
+		RETURNING `+applicationColumns, a.UserID, a.JobID, a.EmailID, a.Status, a.JobTitle, a.Company, a.Via))
+}
+
+func (r *applicationRepository) GetByJob(ctx context.Context, userID, jobID string) (*db.Application, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanApplication(r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT `+applicationColumns+` FROM applications WHERE user_id = $1 AND job_id = $2`, userID, jobID))
+}
+
+func (r *applicationRepository) Get(ctx context.Context, userID, id string) (*db.Application, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanApplication(r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT `+applicationColumns+` FROM applications WHERE user_id = $1 AND id = $2`, userID, id))
+}
+
+func (r *applicationRepository) SetStatus(ctx context.Context, userID, id, status string) (*db.Application, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanApplication(r.store.Conn(ctx).QueryRow(ctx, `
+		UPDATE applications SET status = $3, updated_at = now() WHERE user_id = $1 AND id = $2
+		RETURNING `+applicationColumns, userID, id, status))
 }
 
 func (r *applicationRepository) ListByUser(ctx context.Context, userID string, limit int) ([]db.Application, error) {

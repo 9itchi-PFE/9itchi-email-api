@@ -145,12 +145,30 @@ func (f fakeTracker) Register(context.Context, string, string) (string, string, 
 	return "track-1", "/t/track-1", f.err
 }
 
-type fakeResumes struct{ pdf []byte }
+type fakeResumes struct {
+	pdf []byte
+	err error
+}
 
-func (f fakeResumes) Summary(context.Context, string, string) (string, error) { return "Ines, ENIS", nil }
-func (f fakeResumes) PDF(context.Context, string) ([]byte, error)             { return f.pdf, nil }
+func (f fakeResumes) Summary(context.Context, string, string) (string, error) {
+	return "Ines, ENIS", nil
+}
+func (f fakeResumes) PDF(context.Context, string) ([]byte, error) { return f.pdf, f.err }
 
-type fakeJobs struct{ err error }
+type fakeJobs struct {
+	err  error
+	info *core.JobInfo
+}
+
+func (f fakeJobs) ApplyInfo(context.Context, string) (*core.JobInfo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.info != nil {
+		return f.info, nil
+	}
+	return &core.JobInfo{Title: "Stage React", Company: "Acme", ApplyEmail: "rh@acme.tn", Open: true}, nil
+}
 
 func (f fakeJobs) Job(context.Context, string, string) (*core.JobInfo, error) {
 	if f.err != nil {
@@ -192,7 +210,9 @@ type fakeQuota struct {
 	ok    bool
 }
 
-func (f fakeQuota) Limit(context.Context, string, string) (int, bool, error) { return f.limit, f.ok, nil }
+func (f fakeQuota) Limit(context.Context, string, string) (int, bool, error) {
+	return f.limit, f.ok, nil
+}
 
 type harness struct {
 	svc    EmailService
@@ -359,41 +379,76 @@ func TestGetAndListAreScopedToUser(t *testing.T) {
 	assert.Empty(t, list)
 }
 
-type memApps struct{ rows []db.Application }
-
-func (m *memApps) Upsert(_ context.Context, a *db.Application) (*db.Application, error) {
-	c := *a
-	c.ID = "app-1"
-	m.rows = append(m.rows, c)
-	return &c, nil
-}
-func (m *memApps) ListByUser(context.Context, string, int) ([]db.Application, error) {
-	return m.rows, nil
-}
-
-func TestApplyAndList(t *testing.T) {
+func TestSendNow(t *testing.T) {
 	h := newHarness(nil, unlimited)
-	apps := &memApps{}
-	svc := NewApplicationService(apps, h.svc)
-
-	res, apiErr := svc.Apply(context.Background(), uid, api.ApplyRequest{JobID: jobID, ResumeID: resumID, To: "hr@acme.tn", Subject: "s", Body: "b"})
-	require.Nil(t, apiErr)
-	assert.Equal(t, "sent", res.Status)
-	assert.Equal(t, db.EmailSent, res.Email.Status)
-
 	at := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
-	res, apiErr = svc.Apply(context.Background(), uid, api.ApplyRequest{JobID: jobID, To: "hr@acme.tn", Subject: "s", Body: "b", ScheduledAt: &at})
+	e, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
 	require.Nil(t, apiErr)
-	assert.Equal(t, "scheduled", res.Status)
 
-	list, apiErr := svc.ListApplications(context.Background(), uid)
+	_, apiErr = h.svc.SendNow(context.Background(), "other", e.ID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 404, apiErr.Code)
+
+	out, apiErr := h.svc.SendNow(context.Background(), uid, e.ID)
 	require.Nil(t, apiErr)
-	require.Len(t, list.Items, 2)
-	assert.NotNil(t, list.Items[0].Email)
+	assert.Equal(t, db.EmailSent, out.Status)
+	assert.Len(t, h.mailer.sent, 1)
+	assert.Equal(t, []string{"task-1"}, h.sched.cancelled)
 
-	h = newHarness(apiError(409, "gmail is not connected"), unlimited)
-	_, apiErr = NewApplicationService(&memApps{}, h.svc).Apply(context.Background(), uid, api.ApplyRequest{JobID: jobID, To: "hr@acme.tn", Subject: "s", Body: "b"})
+	_, apiErr = h.svc.SendNow(context.Background(), uid, e.ID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 409, apiErr.Code, "already sent")
+}
+
+func TestSendNowGmailFails(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	at := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
+	e, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+	h.mailer.err = core.ErrGmailAuth
+	_, apiErr = h.svc.SendNow(context.Background(), uid, e.ID)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 409, apiErr.Code)
+	assert.Equal(t, db.EmailFailed, h.repo.rows[e.ID].Status)
+	assert.Empty(t, h.sched.cancelled)
 }
 
+func TestSendNowGmailNotConnected(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	at := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
+	e, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+
+	// Same store, Gmail now disconnected.
+	off := NewEmailService(EmailDeps{
+		Repo: h.repo, Gmail: fakeGmail{err: apiError(409, "gmail is not connected")}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
+		Resumes: fakeResumes{}, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: unlimited, Config: testCfg,
+	})
+	_, apiErr = off.SendNow(context.Background(), uid, e.ID)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 409, apiErr.Code)
+	assert.Equal(t, db.EmailScheduled, h.repo.rows[e.ID].Status, "the email stays scheduled")
+}
+
+func TestSendEmailNeverLeavesWithoutItsCV(t *testing.T) {
+	for name, resumes := range map[string]fakeResumes{"no pdf": {}, "resume-api down": {err: core.ErrPeerUnavailable}} {
+		h := newHarness(nil, unlimited)
+		svc := NewEmailService(EmailDeps{
+			Repo: h.repo, Gmail: fakeGmail{}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
+			Resumes: resumes, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: unlimited, Config: testCfg,
+		})
+		e, apiErr := svc.SendEmail(context.Background(), uid, sendReq())
+		require.NotNil(t, apiErr, name)
+		assert.Equal(t, 502, apiErr.Code, name)
+		assert.Equal(t, db.EmailFailed, e.Status, name)
+		assert.Empty(t, h.mailer.sent, name)
+
+		// Without a chosen CV the email is a plain email and leaves.
+		req := sendReq()
+		req.ResumeID = ""
+		_, apiErr = svc.SendEmail(context.Background(), uid, req)
+		require.Nil(t, apiErr, name)
+		require.Len(t, h.mailer.sent, 1, name)
+		assert.Nil(t, h.mailer.sent[0].Attachment, name)
+	}
+}

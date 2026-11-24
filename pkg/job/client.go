@@ -42,3 +42,21 @@ func (c *Client) Job(ctx context.Context, bearer, id string) (*core.JobInfo, err
 	}
 	return &core.JobInfo{Title: out.Title, Company: out.Company, Description: out.Description}, nil
 }
+
+// ApplyInfo calls GET /internal/jobs/:id: the offer with the address it takes applications at.
+func (c *Client) ApplyInfo(ctx context.Context, id string) (*core.JobInfo, error) {
+	var out struct {
+		Title       string `json:"title"`
+		Company     string `json:"company"`
+		Description string `json:"description"`
+		ApplyEmail  string `json:"apply_email"`
+		Open        bool   `json:"open"`
+	}
+	err := httpx.Do(ctx, c.HTTP, httpx.Request{
+		Method: http.MethodGet, URL: httpx.URL(c.BaseURL, "/internal/jobs/"+url.PathEscape(id)), APIKey: c.APIKey,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &core.JobInfo{Title: out.Title, Company: out.Company, Description: out.Description, ApplyEmail: out.ApplyEmail, Open: out.Open}, nil
+}
