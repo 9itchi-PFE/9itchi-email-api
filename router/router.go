@@ -46,6 +46,14 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.POST("/applications/:id/send", handlers.SendApplicationNow(services.Application))
 	}
 
+	// admin endpoints
+	adminGroup := r.Group("/")
+	adminGroup.Use(AuthMiddleware(), RequireRole("admin"))
+	{
+		adminGroup.GET("/admin/users/:id/applications", handlers.UserApplications(services.Application))
+		adminGroup.GET("/admin/users/:id/gmail", handlers.UserGmailStatus(services.Gmail))
+	}
+
 	// internal endpoints
 	internalGroup := r.Group("/")
 	internalGroup.Use(InternalAPIKeyMiddleware())

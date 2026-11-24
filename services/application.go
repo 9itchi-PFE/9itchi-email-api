@@ -20,6 +20,8 @@ type ApplicationService interface {
 	Apply(ctx context.Context, userID string, req api.ApplyRequest) (*api.ApplicationResponse, *models.ApiError)
 	// GET /applications: tracked applications
 	ListApplications(ctx context.Context, userID string) (*api.ApplicationsResponse, *models.ApiError)
+	// GET /admin/users/:id/applications: the applications of one student, for the team (no recipient, no subject)
+	UserApplications(ctx context.Context, id string) (*api.ApplicationsResponse, *models.ApiError)
 	// PATCH /applications/:id: what the student says happened (replied, withdrawn, closed, back to sent)
 	UpdateApplication(ctx context.Context, userID, id string, req api.UpdateApplicationRequest) (*api.ApplicationResponse, *models.ApiError)
 	// POST /applications/:id/send: send a scheduled application now
@@ -186,6 +188,24 @@ func (s *applicationService) ListApplications(ctx context.Context, userID string
 			e = byID[*apps[i].EmailID]
 		}
 		out.Items = append(out.Items, *toResponse(&apps[i], e))
+	}
+	return out, nil
+}
+
+// UserApplications is what the team sees of a student's applications: the offer, how it was sent, where it stands
+// and when. Who it was written to and its subject are the student's own and are left out.
+func (s *applicationService) UserApplications(ctx context.Context, id string) (*api.ApplicationsResponse, *models.ApiError) {
+	if !uuidRe.MatchString(id) {
+		return nil, apiError(http.StatusBadRequest, "invalid user id")
+	}
+	out, apiErr := s.ListApplications(ctx, strings.ToLower(id))
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	for i := range out.Items {
+		if e := out.Items[i].Email; e != nil {
+			out.Items[i].Email = &api.EmailBrief{ID: e.ID, Status: e.Status, ScheduledAt: e.ScheduledAt, SentAt: e.SentAt}
+		}
 	}
 	return out, nil
 }

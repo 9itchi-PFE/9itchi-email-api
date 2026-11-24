@@ -9,6 +9,7 @@ import (
 
 	"9itchi-email-api/models"
 	"9itchi-email-api/models/api"
+	"9itchi-email-api/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -97,6 +98,52 @@ func TestListApplicationsHandler(t *testing.T) {
 	assert.JSONEq(t, `{"items":[]}`, w.Body.String())
 
 	w = call(ListApplications(&mockApplications{failing: &models.ApiError{Code: 500, Error: assert.AnError}}), http.MethodGet, "/applications", "/applications", "")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func (m *mockApplications) UserApplications(_ context.Context, id string) (*api.ApplicationsResponse, *models.ApiError) {
+	m.id = id
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	return &api.ApplicationsResponse{Items: []api.ApplicationResponse{{ID: "a1", Company: "Acme", Status: "sent"}}}, nil
+}
+
+func TestUserApplicationsHandler(t *testing.T) {
+	m := &mockApplications{}
+	w := call(UserApplications(m), http.MethodGet, "/admin/users/:id/applications", "/admin/users/"+job+"/applications", "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, job, m.id, "the student is the one of the path, not the admin who asks")
+	assert.Contains(t, w.Body.String(), `"company":"Acme"`)
+
+	m.failing = &models.ApiError{Code: http.StatusBadRequest, Error: assert.AnError}
+	w = call(UserApplications(m), http.MethodGet, "/admin/users/:id/applications", "/admin/users/nope/applications", "")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+type mockGmailStatus struct {
+	services.GmailService
+	id      string
+	failing *models.ApiError
+}
+
+func (m *mockGmailStatus) UserGmailStatus(_ context.Context, id string) (*api.GmailStatusResponse, *models.ApiError) {
+	m.id = id
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	return &api.GmailStatusResponse{Connected: true}, nil
+}
+
+func TestUserGmailStatusHandler(t *testing.T) {
+	m := &mockGmailStatus{}
+	w := call(UserGmailStatus(m), http.MethodGet, "/admin/users/:id/gmail", "/admin/users/"+job+"/gmail", "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, job, m.id)
+	assert.JSONEq(t, `{"connected":true}`, w.Body.String())
+
+	m.failing = &models.ApiError{Code: http.StatusInternalServerError, Error: assert.AnError}
+	w = call(UserGmailStatus(m), http.MethodGet, "/admin/users/:id/gmail", "/admin/users/"+job+"/gmail", "")
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 

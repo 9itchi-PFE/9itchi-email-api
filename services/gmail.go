@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"9itchi-email-api/core"
@@ -31,6 +32,8 @@ type GmailService interface {
 	GmailCallback(ctx context.Context, code, state, oauthErr string) (string, *models.ApiError)
 	// GET /gmail/status: connection state
 	GmailStatus(ctx context.Context, userID string) (*api.GmailStatusResponse, *models.ApiError)
+	// GET /admin/users/:id/gmail: whether a student connected Gmail, for the team (no address)
+	UserGmailStatus(ctx context.Context, id string) (*api.GmailStatusResponse, *models.ApiError)
 	// DELETE /gmail/connection: revoke access and delete token
 	RevokeGmail(ctx context.Context, userID string) (*api.GmailStatusResponse, *models.ApiError)
 	// Credentials returns a valid access token and the address of the connected account.
@@ -138,6 +141,19 @@ func (s *gmailService) GmailStatus(ctx context.Context, userID string) (*api.Gma
 	}
 	since := conn.ConnectedAt.UTC().Format(time.RFC3339)
 	return &api.GmailStatusResponse{Connected: true, Email: conn.Email, Since: &since}, nil
+}
+
+// UserGmailStatus says whether a student connected Gmail and since when. The Gmail address itself is left out.
+func (s *gmailService) UserGmailStatus(ctx context.Context, id string) (*api.GmailStatusResponse, *models.ApiError) {
+	if !uuidRe.MatchString(id) {
+		return nil, apiError(http.StatusBadRequest, "invalid user id")
+	}
+	res, apiErr := s.GmailStatus(ctx, strings.ToLower(id))
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	res.Email = ""
+	return res, nil
 }
 
 func (s *gmailService) RevokeGmail(ctx context.Context, userID string) (*api.GmailStatusResponse, *models.ApiError) {

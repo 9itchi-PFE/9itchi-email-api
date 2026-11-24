@@ -56,3 +56,15 @@ func RevokeGmail(svc services.GmailService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// UserGmailStatus: GET /admin/users/:id/gmail (admin) whether one student connected Gmail.
+func UserGmailStatus(svc services.GmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.UserGmailStatus(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

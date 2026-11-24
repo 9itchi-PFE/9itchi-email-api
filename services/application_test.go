@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,4 +335,38 @@ func TestEmailContext(t *testing.T) {
 	_, apiErr = h.svc.EmailContext(context.Background(), emailID)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 500, apiErr.Code)
+}
+
+func TestUserApplicationsForTheTeam(t *testing.T) {
+	h := newApps(fakeJobs{})
+	_, apiErr := h.svc.Apply(context.Background(), uid, gmailReq())
+	require.Nil(t, apiErr)
+
+	// The student sees who the email went to and its subject; the team does not.
+	own, apiErr := h.svc.ListApplications(context.Background(), uid)
+	require.Nil(t, apiErr)
+	require.Len(t, own.Items, 1)
+	assert.Equal(t, "rh@acme.tn", own.Items[0].Email.Recipient)
+
+	res, apiErr := h.svc.UserApplications(context.Background(), strings.ToUpper(uid))
+	require.Nil(t, apiErr)
+	require.Len(t, res.Items, 1)
+	a := res.Items[0]
+	assert.Equal(t, "Acme", a.Company)
+	assert.Equal(t, "Stage React", a.JobTitle)
+	assert.Equal(t, db.ViaGmail, a.Via)
+	assert.Equal(t, db.AppSent, a.Status)
+	require.NotNil(t, a.Email)
+	assert.Empty(t, a.Email.Recipient)
+	assert.Empty(t, a.Email.Subject)
+	assert.Equal(t, db.EmailSent, a.Email.Status)
+	assert.NotNil(t, a.Email.SentAt)
+
+	other, apiErr := h.svc.UserApplications(context.Background(), "99999999-9999-4999-8999-999999999999")
+	require.Nil(t, apiErr)
+	assert.Empty(t, other.Items)
+
+	_, apiErr = h.svc.UserApplications(context.Background(), "nope")
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 }
