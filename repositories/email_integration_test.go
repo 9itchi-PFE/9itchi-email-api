@@ -90,4 +90,16 @@ func TestEmailRepositoryLastBuiltSend(t *testing.T) {
 	assert.Equal(t, 2, n, "only what left with the CV built in 9itchi")
 	require.NotNil(t, last)
 	assert.True(t, last.Equal(latest))
+
+	// A sent row without the time it left still says when: the last change of the row.
+	e, err := repo.Create(ctx, &db.Email{UserID: other, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft})
+	require.NoError(t, err)
+	_, err = store.Conn(ctx).Exec(ctx, `UPDATE emails SET sent_at = NULL WHERE user_id = $1`, other)
+	require.NoError(t, err)
+	require.NoError(t, repo.Finish(ctx, e.ID, db.EmailSent, nil))
+	n, last, err = repo.LastBuiltSend(ctx, other)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	require.NotNil(t, last)
+	assert.WithinDuration(t, time.Now(), *last, time.Minute)
 }
