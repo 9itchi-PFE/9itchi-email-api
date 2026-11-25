@@ -103,3 +103,37 @@ func UserApplications(svc services.ApplicationService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// Match: POST /applications/match (user) how well the student's CV fits an offer, read by the AI.
+func Match(svc services.MatchService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.MatchRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.Match(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// FindMatch: GET /applications/match?job_id=&resume_id=&language= (user) the analysis already made, 404 when none.
+func FindMatch(svc services.MatchService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.MatchRequest
+		if err := c.ShouldBindQuery(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.Find(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

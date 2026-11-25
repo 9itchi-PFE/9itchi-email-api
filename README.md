@@ -26,6 +26,8 @@ Port `8085`, health `/health`.
 | POST | `/applications` | user | Apply (201) |
 | GET | `/applications` | user | ListApplications |
 | GET | `/applications/allowance` | user | Allowance |
+| POST | `/applications/match` | user | Match (`{job_id, resume_id, language}` → `{score, level, strengths, gaps, advice, created_at, limit, used}`: how well the CV fits the offer, read by the AI) |
+| GET | `/applications/match` | user | FindMatch (same fields as query parameters: the analysis already made, 404 when none; never asks the AI) |
 | PATCH | `/applications/:id` | user | UpdateApplication |
 | POST | `/applications/:id/send` | user | SendApplicationNow |
 
@@ -63,3 +65,7 @@ go run main.go
 ## Account deletion
 
 `DELETE /internal/users/:id` (`x-api-key`) is called by account-api before it deletes an account. Here it concerns the applications, the emails (the scheduled ones never leave) and the Gmail connection with its tokens. It runs in one transaction, answers `204`, and can be called again without harm (account-api retries until every service has answered). Nothing about the user is logged.
+
+## AI analysis of an offer
+
+`POST /applications/match` reads the offer (job-api) and the CV as text (resume-api), and asks ai-api how well they fit. The reading is kept in `job_matches` (migration `0006`) under a digest of what the AI read: asking again for the same offer and the same CV returns it without asking the AI nor counting it; a changed CV or offer is read again. The plan's `ai_matches_per_month` limits the readings made in a calendar month (absent: no limit; `0`: 402). An empty CV is a 422 and is not sent. The readings go with the account when it is deleted.

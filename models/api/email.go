@@ -30,3 +30,24 @@ type ScheduleEmailRequest struct {
 	SendEmailRequest
 	ScheduledAt time.Time `json:"scheduled_at" binding:"required"`
 }
+
+// MatchRequest asks how well one CV fits one offer (POST /applications/match), or whether that was already asked
+// (GET, same fields as query parameters).
+type MatchRequest struct {
+	JobID    string `json:"job_id" form:"job_id" binding:"required,uuid"`
+	ResumeID string `json:"resume_id" form:"resume_id" binding:"required,uuid"`
+	Language string `json:"language" form:"language" binding:"omitempty,oneof=fr en ar"`
+}
+
+// MatchResponse is the AI's reading of the CV against the offer, with what is left of the plan's analyses this
+// month (Limit nil: no limit).
+type MatchResponse struct {
+	Score     int       `json:"score"`
+	Level     string    `json:"level"`
+	Strengths []string  `json:"strengths"`
+	Gaps      []string  `json:"gaps"`
+	Advice    string    `json:"advice"`
+	CreatedAt time.Time `json:"created_at"`
+	Limit     *int      `json:"limit"`
+	Used      int       `json:"used"`
+}

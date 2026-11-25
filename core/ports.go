@@ -22,6 +22,9 @@ const (
 	// QuotaFreeApplications applies when the monthly limit is 0 (no subscription): how many applications still
 	// leave, over the whole life of the account, with the file the student imported.
 	QuotaFreeApplications = "free_applications"
+	// QuotaAIMatches is the monthly limit of AI analyses of how well the CV fits an offer (absent: no limit;
+	// 0: none). Reading an analysis already made again is not counted.
+	QuotaAIMatches = "ai_matches_per_month"
 )
 
 // GoogleToken is an OAuth2 token pair stored (encrypted) per user.
@@ -81,6 +84,8 @@ type JobInfo struct {
 	Description string
 	// ApplyEmail is where the offer takes applications; empty when it only takes them elsewhere.
 	ApplyEmail string
+	// Skills are the skills the offer names (empty from the internal view).
+	Skills []string
 	// Open is false once the deadline of the offer has passed.
 	Open bool
 }
@@ -118,4 +123,28 @@ type QuotaSource interface {
 	// Quotas returns the limits of the user's plan (the active one, else the plan without subscription). A key
 	// that is absent sets no limit.
 	Quotas(ctx context.Context, userID string) (map[string]int, error)
+}
+
+// MatchInput is what the AI reads to say how well a CV fits an offer.
+type MatchInput struct {
+	JobTitle       string
+	Company        string
+	JobDescription string
+	JobSkills      []string
+	Candidate      string
+	Language       string
+}
+
+// MatchResult is the AI's reading: a score out of 100, its level, strengths, gaps and one piece of advice.
+type MatchResult struct {
+	Score     int
+	Level     string
+	Strengths []string
+	Gaps      []string
+	Advice    string
+}
+
+// Matcher calls 9itchi-ai-api (internal route).
+type Matcher interface {
+	Match(ctx context.Context, in MatchInput) (*MatchResult, error)
 }
