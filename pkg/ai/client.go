@@ -41,3 +41,31 @@ func (c *Client) Draft(ctx context.Context, bearer string, in core.DraftInput) (
 	}, &out)
 	return out.Subject, out.Body, err
 }
+
+var _ core.Matcher = (*Client)(nil)
+
+// Match calls POST /ai/jobs/match (internal). The CV text and the offer are never logged.
+func (c *Client) Match(ctx context.Context, in core.MatchInput) (*core.MatchResult, error) {
+	var out struct {
+		Score     int      `json:"score"`
+		Level     string   `json:"level"`
+		Strengths []string `json:"strengths"`
+		Gaps      []string `json:"gaps"`
+		Advice    string   `json:"advice"`
+	}
+	skills := in.JobSkills
+	if skills == nil {
+		skills = []string{}
+	}
+	err := httpx.Do(ctx, c.HTTP, httpx.Request{
+		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/ai/jobs/match"), APIKey: c.APIKey,
+		Body: map[string]any{
+			"job":     map[string]any{"title": in.JobTitle, "description": in.JobDescription, "skills": skills},
+			"company": in.Company, "candidate": in.Candidate, "language": in.Language,
+		},
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &core.MatchResult{Score: out.Score, Level: out.Level, Strengths: out.Strengths, Gaps: out.Gaps, Advice: out.Advice}, nil
+}

@@ -20,6 +20,7 @@ type Services struct {
 	Gmail       GmailService
 	Email       EmailService
 	Application ApplicationService
+	Match       MatchService
 	Clients     *Clients
 }
 
@@ -55,6 +56,9 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Gmail:       gmail,
 		Email:       emails,
 		Application: NewApplicationService(repos.Application, emails, clients.Job),
-		Clients:     clients,
+		Match: NewMatchService(MatchDeps{
+			Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
+		}),
+		Clients: clients,
 	}
 }
