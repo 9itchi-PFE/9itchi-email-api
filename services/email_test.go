@@ -32,10 +32,11 @@ const (
 )
 
 type memEmails struct {
-	mu   sync.Mutex
-	rows map[string]*db.Email
-	n    int
-	sent int
+	builtErr error
+	mu       sync.Mutex
+	rows     map[string]*db.Email
+	n        int
+	sent     int
 }
 
 func newMemEmails() *memEmails { return &memEmails{rows: map[string]*db.Email{}} }
@@ -138,6 +139,27 @@ func (m *memEmails) CountOriginal(_ context.Context, userID string) (int, error)
 		}
 	}
 	return n, nil
+}
+
+// LastBuiltSend counts like the repository: the sent emails that carry the CV built in 9itchi.
+func (m *memEmails) LastBuiltSend(_ context.Context, userID string) (int, *time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.builtErr != nil {
+		return 0, nil, m.builtErr
+	}
+	n := 0
+	var last *time.Time
+	for _, e := range m.rows {
+		if e.UserID != userID || e.CVOriginal || e.Status != db.EmailSent {
+			continue
+		}
+		n++
+		if e.SentAt != nil && (last == nil || e.SentAt.After(*last)) {
+			last = e.SentAt
+		}
+	}
+	return n, last, nil
 }
 
 type fakeGmail struct {

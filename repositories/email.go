@@ -27,6 +27,9 @@ type EmailRepository interface {
 	// CountOriginal counts the user's emails that carry the imported file and left or are about to (sent,
 	// sending, scheduled), over the whole life of the account.
 	CountOriginal(ctx context.Context, userID string) (int, error)
+	// LastBuiltSend returns how many of the user's emails left with the CV built in 9itchi (not the imported
+	// file) and when the last one did (nil when none; the last change of the row when the time it left is missing).
+	LastBuiltSend(ctx context.Context, userID string) (int, *time.Time, error)
 }
 
 type emailRepository struct {
@@ -158,4 +161,14 @@ func (r *emailRepository) CountOriginal(ctx context.Context, userID string) (int
 	err := r.store.Conn(ctx).QueryRow(ctx,
 		`SELECT count(*) FROM emails WHERE user_id = $1 AND cv_original AND status IN ('sent', 'sending', 'scheduled')`, userID).Scan(&n)
 	return n, MapError(err)
+}
+
+func (r *emailRepository) LastBuiltSend(ctx context.Context, userID string) (int, *time.Time, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	var n int
+	var last *time.Time
+	err := r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT count(*), max(coalesce(sent_at, updated_at)) FROM emails WHERE user_id = $1 AND status = 'sent' AND NOT cv_original`, userID).Scan(&n, &last)
+	return n, last, MapError(err)
 }
