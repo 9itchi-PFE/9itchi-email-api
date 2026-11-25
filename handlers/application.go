@@ -39,6 +39,18 @@ func ListApplications(svc services.ApplicationService) gin.HandlerFunc {
 	}
 }
 
+// Allowance: GET /applications/allowance (user) how the user's applications leave and how many are left.
+func Allowance(svc services.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.Allowance(c.Request.Context(), c.GetString("user_id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // UpdateApplication: PATCH /applications/:id (user) the student says what happened: replied, withdrawn, closed, sent.
 func UpdateApplication(svc services.ApplicationService) gin.HandlerFunc {
 	return func(c *gin.Context) {

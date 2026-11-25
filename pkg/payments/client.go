@@ -27,8 +27,8 @@ func New(baseURL, apiKey string) *Client {
 
 var _ core.QuotaSource = (*Client)(nil)
 
-// Limit calls GET /internal/quotas/:userId (active plan, else Free).
-func (c *Client) Limit(ctx context.Context, userID, key string) (int, bool, error) {
+// Quotas calls GET /internal/quotas/:userId (active plan, else Free).
+func (c *Client) Quotas(ctx context.Context, userID string) (map[string]int, error) {
 	var out struct {
 		Quotas map[string]int `json:"quotas"`
 	}
@@ -36,8 +36,7 @@ func (c *Client) Limit(ctx context.Context, userID, key string) (int, bool, erro
 		Method: http.MethodGet, URL: httpx.URL(c.BaseURL, "/internal/quotas/"+url.PathEscape(userID)), APIKey: c.APIKey,
 	}, &out)
 	if err != nil {
-		return 0, false, err
+		return nil, err
 	}
-	limit, ok := out.Quotas[key]
-	return limit, ok, nil
+	return out.Quotas, nil
 }

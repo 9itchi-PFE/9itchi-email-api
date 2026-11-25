@@ -63,3 +63,12 @@ type EmailContextResponse struct {
 	JobTitle      string `json:"job_title"`
 	Company       string `json:"company"`
 }
+
+// AllowanceResponse is what the user's plan lets them send through 9itchi. Mode is "plan" (the CV built in
+// 9itchi, Limit per month), "original" (no subscription: the imported file, Limit over the life of the account)
+// or "none". Limit is null when there is none.
+type AllowanceResponse struct {
+	Mode  string `json:"mode"`
+	Limit *int   `json:"limit"`
+	Used  int    `json:"used"`
+}

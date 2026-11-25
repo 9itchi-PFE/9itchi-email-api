@@ -22,6 +22,9 @@ type EmailRepository interface {
 	// Cancel moves a scheduled email of userID to "cancelled" (ErrNotFound otherwise).
 	Cancel(ctx context.Context, userID, id string) (*db.Email, error)
 	CountSentSince(ctx context.Context, userID string, since time.Time) (int, error)
+	// CountOriginal counts the user's emails that carry the imported file and left or are about to (sent,
+	// sending, scheduled), over the whole life of the account.
+	CountOriginal(ctx context.Context, userID string) (int, error)
 }
 
 type emailRepository struct {
@@ -32,14 +35,14 @@ func NewEmailRepository(store *Store) EmailRepository {
 	return &emailRepository{store: store}
 }
 
-const emailColumns = `id, user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, sent_at, tracking_id, schedule_task_id, created_at, updated_at`
+const emailColumns = `id, user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, sent_at, tracking_id, schedule_task_id, created_at, updated_at, cv_original`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanEmail(r rowScanner) (*db.Email, error) {
 	var e db.Email
 	err := r.Scan(&e.ID, &e.UserID, &e.JobID, &e.ResumeID, &e.Recipient, &e.Subject, &e.Body, &e.Status,
-		&e.ScheduledAt, &e.SentAt, &e.TrackingID, &e.ScheduleTaskID, &e.CreatedAt, &e.UpdatedAt)
+		&e.ScheduledAt, &e.SentAt, &e.TrackingID, &e.ScheduleTaskID, &e.CreatedAt, &e.UpdatedAt, &e.CVOriginal)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -50,10 +53,10 @@ func (r *emailRepository) Create(ctx context.Context, e *db.Email) (*db.Email, e
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanEmail(r.store.Conn(ctx).QueryRow(ctx, `
-		INSERT INTO emails (user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, tracking_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, gen_random_uuid())
+		INSERT INTO emails (user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, tracking_id, cv_original)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, gen_random_uuid(), $9)
 		RETURNING `+emailColumns,
-		e.UserID, e.JobID, e.ResumeID, e.Recipient, e.Subject, e.Body, e.Status, e.ScheduledAt))
+		e.UserID, e.JobID, e.ResumeID, e.Recipient, e.Subject, e.Body, e.Status, e.ScheduledAt, e.CVOriginal))
 }
 
 func (r *emailRepository) Get(ctx context.Context, userID, id string) (*db.Email, error) {
@@ -134,5 +137,14 @@ func (r *emailRepository) CountSentSince(ctx context.Context, userID string, sin
 	var n int
 	err := r.store.Conn(ctx).QueryRow(ctx,
 		`SELECT count(*) FROM emails WHERE user_id = $1 AND status = 'sent' AND sent_at >= $2`, userID, since).Scan(&n)
+	return n, MapError(err)
+}
+
+func (r *emailRepository) CountOriginal(ctx context.Context, userID string) (int, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	var n int
+	err := r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT count(*) FROM emails WHERE user_id = $1 AND cv_original AND status IN ('sent', 'sending', 'scheduled')`, userID).Scan(&n)
 	return n, MapError(err)
 }
