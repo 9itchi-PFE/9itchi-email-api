@@ -22,6 +22,8 @@ type EmailRepository interface {
 	// Cancel moves a scheduled email of userID to "cancelled" (ErrNotFound otherwise).
 	Cancel(ctx context.Context, userID, id string) (*db.Email, error)
 	CountSentSince(ctx context.Context, userID string, since time.Time) (int, error)
+	// SentAnother says whether the user has a sent email other than this one: false means this one is their first.
+	SentAnother(ctx context.Context, userID, exceptID string) (bool, error)
 	// CountOriginal counts the user's emails that carry the imported file and left or are about to (sent,
 	// sending, scheduled), over the whole life of the account.
 	CountOriginal(ctx context.Context, userID string) (int, error)
@@ -138,6 +140,15 @@ func (r *emailRepository) CountSentSince(ctx context.Context, userID string, sin
 	err := r.store.Conn(ctx).QueryRow(ctx,
 		`SELECT count(*) FROM emails WHERE user_id = $1 AND status = 'sent' AND sent_at >= $2`, userID, since).Scan(&n)
 	return n, MapError(err)
+}
+
+func (r *emailRepository) SentAnother(ctx context.Context, userID, exceptID string) (bool, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	var other bool
+	err := r.store.Conn(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM emails WHERE user_id = $1 AND status = 'sent' AND id <> $2)`, userID, exceptID).Scan(&other)
+	return other, MapError(err)
 }
 
 func (r *emailRepository) CountOriginal(ctx context.Context, userID string) (int, error) {

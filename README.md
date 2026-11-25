@@ -48,7 +48,7 @@ Each application keeps the `job_title` and `company` of its offer (offers are re
 
 ## Events (RabbitMQ)
 
-Optional. With `RABBITMQ_URL` set, `email.sent` and `email.failed` (`email_id`, `user_id`, `scheduled`: true when the scheduler sent it, false when the student clicked) are published to the topic exchange `9itchi.events` (routing key = event name) as persistent JSON messages, each confirmed by the broker and carrying a message id consumers deduplicate on. Without the variable the event name is only logged.
+Optional. With `RABBITMQ_URL` set, `email.sent` and `email.failed` (`email_id`, `user_id`, `scheduled`: true when the scheduler sent it, false when the student clicked) are published to the topic exchange `9itchi.events` (routing key = event name) as persistent JSON messages, each confirmed by the broker and carrying a message id consumers deduplicate on. Without the variable the event name is only logged. `application.first_sent` (`user_id`) is published once per student, when their first email ever has left: statistics-api counts it as the step « first application ».
 
 A publish failure is logged and never fails the request. A broker that cannot be reached is left alone for 15 s, so it costs one short wait and not one per request; events raised meanwhile are lost (there is no outbox). Broker tests: `RABBITMQ_TEST_URL=amqp://guest:guest@localhost:5672/ go test -tags integration ./core/` (skipped without the variable).
 

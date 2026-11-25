@@ -17,6 +17,8 @@ const (
 	EventJobsMatched         = "jobs.matched"
 	EventSubscriptionCreated = "subscription.created"
 	EventPaymentCompleted    = "payment.completed"
+	// EventApplicationFirstSent: the first email a student ever sent through 9itchi has left (once per student).
+	EventApplicationFirstSent = "application.first_sent"
 )
 
 // Publisher sends domain events. Swap LogPublisher for a RabbitMQ implementation without touching services.
