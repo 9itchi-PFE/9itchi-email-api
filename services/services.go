@@ -15,6 +15,8 @@ import (
 
 // Services holds service implementations and the peer clients they call.
 type Services struct {
+	// Erase removes what this service keeps about a deleted account.
+	Erase       EraseService
 	Gmail       GmailService
 	Email       EmailService
 	Application ApplicationService
@@ -49,6 +51,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Events: core.NewPublisher(config.RabbitMQURL), Config: config,
 	})
 	return &Services{
+		Erase:       NewEraseService(repos.Erase),
 		Gmail:       gmail,
 		Email:       emails,
 		Application: NewApplicationService(repos.Application, emails, clients.Job),
