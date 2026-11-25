@@ -58,3 +58,7 @@ A publish failure is logged and never fails the request. A broker that cannot be
 cp .env.example .env
 go run main.go
 ```
+
+## Account deletion
+
+`DELETE /internal/users/:id` (`x-api-key`) is called by account-api before it deletes an account. Here it concerns the applications, the emails (the scheduled ones never leave) and the Gmail connection with its tokens. It runs in one transaction, answers `204`, and can be called again without harm (account-api retries until every service has answered). Nothing about the user is logged.

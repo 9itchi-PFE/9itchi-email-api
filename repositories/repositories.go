@@ -12,6 +12,7 @@ type Repositories struct {
 	Gmail       GmailRepository
 	Email       EmailRepository
 	Application ApplicationRepository
+	Erase       EraseRepository
 }
 
 // InitRepositories connects to PostgreSQL, applies migrations and builds the repositories.
@@ -28,6 +29,7 @@ func InitRepositories(ctx context.Context, config utils.AppConfig) (*Repositorie
 		Gmail:       NewGmailRepository(store),
 		Email:       NewEmailRepository(store),
 		Application: NewApplicationRepository(store),
+		Erase:       NewEraseRepository(store),
 	}, nil
 }
 
