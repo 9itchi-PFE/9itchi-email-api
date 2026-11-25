@@ -12,6 +12,7 @@ import (
 	"9itchi-email-api/models/api"
 	"9itchi-email-api/models/db"
 	"9itchi-email-api/repositories"
+	"9itchi-email-api/utils"
 )
 
 // ApplicationService holds all business logic for application. Handlers stay thin.
@@ -34,10 +35,16 @@ type applicationService struct {
 	repo   repositories.ApplicationRepository
 	emails EmailService
 	jobs   core.JobSource
+	events core.Publisher
 }
 
-func NewApplicationService(repo repositories.ApplicationRepository, emails EmailService, jobs core.JobSource) ApplicationService {
-	return &applicationService{repo: repo, emails: emails, jobs: jobs}
+// NewApplicationService builds the service; events, when given, receives application.replied.
+func NewApplicationService(repo repositories.ApplicationRepository, emails EmailService, jobs core.JobSource, events ...core.Publisher) ApplicationService {
+	s := &applicationService{repo: repo, emails: emails, jobs: jobs}
+	if len(events) > 0 {
+		s.events = events[0]
+	}
+	return s
 }
 
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -244,6 +251,13 @@ func (s *applicationService) UpdateApplication(ctx context.Context, userID, id s
 	saved, err := s.repo.SetStatus(ctx, userID, id, req.Status)
 	if err != nil {
 		return nil, repoError(err, "application not found")
+	}
+	// A company answered: counted by statistics-api. Marking it again is not a new answer. A failed publish is
+	// logged and never fails the change.
+	if req.Status == db.AppReplied && a.Status != db.AppReplied && s.events != nil {
+		if err := s.events.Publish(ctx, core.EventApplicationReplied, map[string]any{"user_id": userID}); err != nil {
+			utils.Logger.Logger.Warnw("publish application.replied failed", "error", err)
+		}
 	}
 	return toResponse(saved, e), nil
 }
