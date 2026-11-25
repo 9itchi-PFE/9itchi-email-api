@@ -45,6 +45,8 @@ type EmailService interface {
 	Allowance(ctx context.Context, userID string) (*api.AllowanceResponse, *models.ApiError)
 	// POST /internal/emails/:id/dispatch: called by schedule-api when due
 	DispatchScheduled(ctx context.Context, id string) (*db.Email, *models.ApiError)
+	// GET /admin/users/:id/sent-with-cv: how many applications left with the CV built in 9itchi, and the last time
+	UserBuiltSends(ctx context.Context, id string) (*api.UserBuiltSendsResponse, *models.ApiError)
 }
 
 // EmailDeps are the collaborators of the email service (all mockable).

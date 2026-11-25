@@ -108,3 +108,16 @@ func DispatchScheduled(svc services.EmailService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// UserBuiltSends: GET /admin/users/:id/sent-with-cv (admin) how many applications a student sent with the CV built
+// in 9itchi and when the last one left.
+func UserBuiltSends(svc services.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.UserBuiltSends(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

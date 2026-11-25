@@ -60,3 +60,34 @@ func TestEmailRepositoryCountOriginal(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.CVOriginal)
 }
+
+func TestEmailRepositoryLastBuiltSend(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewEmailRepository(store)
+	const user, other = "00000000-0000-0000-0000-0000000000b1", "00000000-0000-0000-0000-0000000000b2"
+	send := func(userID string, original bool, at *time.Time) {
+		e, err := repo.Create(ctx, &db.Email{UserID: userID, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft, CVOriginal: original})
+		require.NoError(t, err)
+		if at != nil {
+			require.NoError(t, repo.Finish(ctx, e.ID, db.EmailSent, at))
+		}
+	}
+	n, last, err := repo.LastBuiltSend(ctx, user)
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	assert.Nil(t, last)
+
+	first, latest := time.Now().Add(-48*time.Hour).Truncate(time.Second), time.Now().Add(-time.Hour).Truncate(time.Second)
+	send(user, false, &latest)
+	send(user, false, &first)
+	send(user, true, &latest) // the imported file
+	send(user, false, nil)    // a draft
+	send(other, false, &latest)
+
+	n, last, err = repo.LastBuiltSend(ctx, user)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n, "only what left with the CV built in 9itchi")
+	require.NotNil(t, last)
+	assert.True(t, last.Equal(latest))
+}
