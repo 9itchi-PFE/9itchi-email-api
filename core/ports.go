@@ -25,6 +25,9 @@ const (
 	// QuotaAIMatches is the monthly limit of AI analyses of how well the CV fits an offer (absent: no limit;
 	// 0: none). Reading an analysis already made again is not counted.
 	QuotaAIMatches = "ai_matches_per_month"
+	// QuotaAIDrafts is the monthly limit of letters written by the AI (absent: no limit; 0: none). A letter
+	// already written for the same offer and CV, given back again, is not counted.
+	QuotaAIDrafts = "ai_drafts_per_month"
 )
 
 // GoogleToken is an OAuth2 token pair stored (encrypted) per user.

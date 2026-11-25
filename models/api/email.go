@@ -8,12 +8,18 @@ type DraftEmailRequest struct {
 	ResumeID string `json:"resume_id" binding:"omitempty,uuid"`
 	Language string `json:"language" binding:"omitempty,oneof=fr en ar"`
 	Tone     string `json:"tone" binding:"omitempty,oneof=formal friendly"`
+	// Fresh asks the AI for a new letter (« Réécrire »); otherwise the last one written for the same offer, CV,
+	// language and tone comes back without being counted.
+	Fresh bool `json:"fresh"`
 }
 
-// DraftEmailResponse is the AI draft; nothing is stored until the user sends or schedules it.
+// DraftEmailResponse is the AI's letter, with what is left of the plan's AI letters this month (Limit nil: no
+// limit). The letter is kept for the student only; it leaves only when they send it.
 type DraftEmailResponse struct {
 	Subject string `json:"subject"`
 	Body    string `json:"body"`
+	Limit   *int   `json:"limit"`
+	Used    int    `json:"used"`
 }
 
 // SendEmailRequest is the body of POST /emails.

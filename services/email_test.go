@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -230,14 +232,64 @@ func (f fakeJobs) Job(context.Context, string, string) (*core.JobInfo, error) {
 	return &core.JobInfo{Title: "Stage React", Company: "Acme", Description: "desc"}, nil
 }
 
-type fakeDrafter struct{ in core.DraftInput }
+type fakeDrafter struct {
+	in    core.DraftInput
+	calls int
+	err   error
+}
 
 func (f *fakeDrafter) Draft(_ context.Context, bearer string, in core.DraftInput) (string, string, error) {
 	f.in = in
+	f.calls++
 	if bearer == "" {
 		return "", "", errors.New("no bearer")
 	}
-	return "Candidature", "Bonjour", nil
+	if f.err != nil {
+		return "", "", f.err
+	}
+	return "Candidature", fmt.Sprintf("Bonjour (%d)", f.calls), nil
+}
+
+type memDrafts struct {
+	mu   sync.Mutex
+	rows []db.AIDraft
+	at   time.Time
+}
+
+func (m *memDrafts) Latest(_ context.Context, userID, jobID, hash, language, tone string) (*db.AIDraft, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.rows) - 1; i >= 0; i-- {
+		r := m.rows[i]
+		if r.UserID == userID && r.JobID == jobID && r.InputHash == hash && r.Language == language && r.Tone == tone {
+			return &r, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
+func (m *memDrafts) Save(_ context.Context, d *db.AIDraft) (*db.AIDraft, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c := *d
+	c.CreatedAt = m.at
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	}
+	m.rows = append(m.rows, c)
+	return &c, nil
+}
+
+func (m *memDrafts) CountSince(_ context.Context, userID string, since time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, r := range m.rows {
+		if r.UserID == userID && !r.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 type fakeScheduler struct {
@@ -315,7 +367,7 @@ func newHarnessWith(gmailErr *models.ApiError, quota fakeQuota, resumes fakeResu
 	h.svc = NewEmailService(EmailDeps{
 		Repo: h.repo, Gmail: fakeGmail{err: gmailErr}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
 		Resumes: resumes, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: quota,
-		Events: h.events,
+		Events: h.events, Drafts: &memDrafts{},
 		Config: testCfg, Now: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	})
 	return h
@@ -446,6 +498,7 @@ func TestDraftEmail(t *testing.T) {
 	out, apiErr := h.svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID, Language: "fr"})
 	require.Nil(t, apiErr)
 	assert.Equal(t, "Candidature", out.Subject)
+	assert.Nil(t, out.Limit, "no key in the plan: no limit")
 	assert.Equal(t, "Acme", h.draft.in.Company)
 	assert.Equal(t, "Ines, ENIS", h.draft.in.CandidateSummary)
 
@@ -715,4 +768,76 @@ func TestFirstApplicationIsAnnouncedOnce(t *testing.T) {
 	h.mailer.err = assert.AnError
 	_, _ = h.svc.SendEmail(context.Background(), uid, sendReq())
 	assert.Zero(t, firsts())
+}
+
+func TestAILettersAreKeptAndCounted(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	drafts := &memDrafts{}
+	svc := h.svc.(*emailService)
+	svc.Drafts = drafts
+	svc.Quotas = mapQuota{core.QuotaAIDrafts: 1}
+	req := api.DraftEmailRequest{JobID: jobID, ResumeID: resumID, Language: "fr"}
+
+	out, apiErr := svc.DraftEmail(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	assert.Equal(t, "Bonjour (1)", out.Body)
+	require.NotNil(t, out.Limit)
+	assert.Equal(t, 1, *out.Limit)
+	assert.Equal(t, 1, out.Used)
+	assert.Equal(t, "formal", h.draft.in.Tone, "formal by default")
+
+	out, apiErr = svc.DraftEmail(context.Background(), uid, req)
+	require.Nil(t, apiErr, "the same offer and CV give the letter back, even at the limit")
+	assert.Equal(t, "Bonjour (1)", out.Body)
+	assert.Equal(t, 1, h.draft.calls, "without asking the AI again")
+	assert.Equal(t, 1, out.Used, "nor counting it")
+
+	for name, r := range map[string]api.DraftEmailRequest{
+		"« Réécrire »":     {JobID: jobID, ResumeID: resumID, Language: "fr", Fresh: true},
+		"another tone":     {JobID: jobID, ResumeID: resumID, Language: "fr", Tone: "friendly"},
+		"another language": {JobID: jobID, ResumeID: resumID, Language: "en"},
+	} {
+		_, apiErr = svc.DraftEmail(context.Background(), uid, r)
+		require.NotNil(t, apiErr, name)
+		assert.Equal(t, http.StatusPaymentRequired, apiErr.Code, name)
+		assert.Contains(t, apiErr.Error.Error(), "monthly limit", name)
+	}
+	assert.Equal(t, 1, h.draft.calls)
+
+	svc.Quotas = mapQuota{core.QuotaAIDrafts: 5}
+	out, apiErr = svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID, Language: "fr", Fresh: true})
+	require.Nil(t, apiErr)
+	assert.Equal(t, "Bonjour (2)", out.Body, "« Réécrire » asks for a new letter")
+	out, apiErr = svc.DraftEmail(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	assert.Equal(t, "Bonjour (2)", out.Body, "the newest letter comes back")
+
+	drafts.at = time.Date(2026, 4, 30, 23, 0, 0, 0, time.UTC)
+	other := &memDrafts{at: drafts.at}
+	svc.Drafts = other
+	svc.Quotas = mapQuota{core.QuotaAIDrafts: 1}
+	_, apiErr = svc.DraftEmail(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	other.at = time.Time{}
+	_, apiErr = svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID, Language: "fr", Fresh: true})
+	require.Nil(t, apiErr, "last month's letter does not count this month")
+}
+
+func TestAILetterNotInThePlan(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	svc := h.svc.(*emailService)
+	svc.Quotas = mapQuota{core.QuotaAIDrafts: 0}
+	_, apiErr := svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusPaymentRequired, apiErr.Code)
+	assert.Contains(t, apiErr.Error.Error(), "part of the subscription")
+	assert.Zero(t, h.draft.calls)
+
+	svc.Quotas = mapQuota{}
+	h.draft.err = errors.New("ai down")
+	_, apiErr = svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadGateway, apiErr.Code)
+	n, _ := svc.Drafts.CountSince(context.Background(), uid, time.Time{})
+	assert.Zero(t, n, "a letter the AI did not write is not counted")
 }

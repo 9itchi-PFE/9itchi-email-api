@@ -66,6 +66,10 @@ go run main.go
 
 `DELETE /internal/users/:id` (`x-api-key`) is called by account-api before it deletes an account. Here it concerns the applications, the emails (the scheduled ones never leave) and the Gmail connection with its tokens. It runs in one transaction, answers `204`, and can be called again without harm (account-api retries until every service has answered). Nothing about the user is logged.
 
+## AI letters
+
+`POST /emails/draft` keeps each letter the AI writes in `ai_drafts` (migration `0007`), under a digest of the offer and of the CV as the AI read them. Asking again for the same offer, CV, language and tone gives the last letter back without asking the AI nor counting it; `"fresh": true` (« Réécrire ») asks for a new one. The plan's `ai_drafts_per_month` limits the letters written in a calendar month (absent: no limit; `0`: 402 « part of the subscription »; reached: 402 « monthly limit »); the answer carries `limit` and `used`. ai-api's draft route is internal: the call sends the internal key (and still the student's token, until every ai-api has the internal route). Letters are erased with the account.
+
 ## AI analysis of an offer
 
 `POST /applications/match` reads the offer (job-api) and the CV as text (resume-api), and asks ai-api how well they fit. The reading is kept in `job_matches` (migration `0006`) under a digest of what the AI read: asking again for the same offer and the same CV returns it without asking the AI nor counting it; a changed CV or offer is read again. The plan's `ai_matches_per_month` limits the readings made in a calendar month (absent: no limit; `0`: 402). An empty CV is a 422 and is not sent. The readings go with the account when it is deleted.
