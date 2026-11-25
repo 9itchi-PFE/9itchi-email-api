@@ -385,6 +385,13 @@ func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (
 		utils.Logger.Logger.Warnw("email: sent but status not stored", "email_id", e.ID, "error", err)
 	}
 	s.publish(ctx, core.EventEmailSent, e, scheduled)
+	// The first email a student ever sends is also the step « first application » of the statistics. A failed
+	// lookup only loses that figure, never the send.
+	if other, err := s.Repo.SentAnother(ctx, e.UserID, e.ID); err == nil && !other {
+		if err := s.Events.Publish(ctx, core.EventApplicationFirstSent, map[string]any{"user_id": e.UserID}); err != nil {
+			utils.Logger.Logger.Warnw("publish event", "event", core.EventApplicationFirstSent, "error", err)
+		}
+	}
 	e.Status, e.SentAt = db.EmailSent, &sentAt
 	return e, nil
 }

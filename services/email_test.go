@@ -116,6 +116,17 @@ func (m *memEmails) CountSentSince(context.Context, string, time.Time) (int, err
 	return m.sent, nil
 }
 
+func (m *memEmails) SentAnother(_ context.Context, userID, exceptID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.rows {
+		if e.UserID == userID && e.ID != exceptID && e.Status == db.EmailSent {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CountOriginal counts like the repository: the emails that carry the imported file and left or are about to.
 func (m *memEmails) CountOriginal(_ context.Context, userID string) (int, error) {
 	m.mu.Lock()
@@ -514,7 +525,10 @@ func TestEmailEventsSayWhetherTheSchedulerSentIt(t *testing.T) {
 	h := newHarness(nil, unlimited)
 	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
 	require.Nil(t, apiErr)
-	require.Len(t, h.events.got, 1)
+	// The very first email also announces the student's first application; it is set aside here.
+	require.Len(t, h.events.got, 2)
+	assert.Equal(t, core.EventApplicationFirstSent, h.events.got[1].name)
+	h.events.got = h.events.got[:1]
 	assert.Equal(t, core.EventEmailSent, h.events.got[0].name)
 	assert.Equal(t, map[string]any{"email_id": e.ID, "user_id": uid, "scheduled": false}, h.events.got[0].payload)
 
@@ -652,4 +666,31 @@ func TestAllowance(t *testing.T) {
 	_, apiErr := h.svc.Allowance(context.Background(), uid)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, 502, apiErr.Code)
+}
+
+// The first email a student ever sends is announced once: the second one is not a first.
+func TestFirstApplicationIsAnnouncedOnce(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	firsts := func() int {
+		n := 0
+		for _, e := range h.events.got {
+			if e.name == core.EventApplicationFirstSent {
+				assert.Equal(t, map[string]any{"user_id": uid}, e.payload, "nothing but who")
+				n++
+			}
+		}
+		return n
+	}
+	_, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, firsts())
+	_, apiErr = h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, firsts())
+
+	// An email that does not leave announces nothing.
+	h = newHarness(nil, unlimited)
+	h.mailer.err = assert.AnError
+	_, _ = h.svc.SendEmail(context.Background(), uid, sendReq())
+	assert.Zero(t, firsts())
 }

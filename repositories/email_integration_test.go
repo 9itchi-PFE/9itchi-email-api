@@ -56,6 +56,21 @@ func TestEmailRepositoryCountOriginal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, n, "sent and scheduled count; failed, cancelled, the built CV and other students do not")
 
+	// The first sent email of a student has no other sent email beside it; a scheduled one is not a sent one.
+	another, err := repo.SentAnother(ctx, user, sent.ID)
+	require.NoError(t, err)
+	assert.False(t, another)
+	second := create(user, db.EmailDraft, false)
+	_, err = repo.Claim(ctx, second.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Finish(ctx, second.ID, db.EmailSent, nil))
+	another, err = repo.SentAnother(ctx, user, second.ID)
+	require.NoError(t, err)
+	assert.True(t, another)
+	another, err = repo.SentAnother(ctx, other, second.ID)
+	require.NoError(t, err)
+	assert.False(t, another, "another student's emails do not count")
+
 	got, err := repo.Get(ctx, user, sent.ID)
 	require.NoError(t, err)
 	assert.True(t, got.CVOriginal)
