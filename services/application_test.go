@@ -370,3 +370,29 @@ func TestUserApplicationsForTheTeam(t *testing.T) {
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusBadRequest, apiErr.Code)
 }
+
+func TestAReplyIsAnnouncedOnce(t *testing.T) {
+	h := newApps(fakeJobs{})
+	events := &recordedEvents{}
+	h.svc = NewApplicationService(h.apps, h.harness.svc, fakeJobs{}, events)
+	_, apiErr := h.svc.Apply(context.Background(), uid, api.ApplyRequest{JobID: jobID, Via: db.ViaSelf})
+	require.Nil(t, apiErr)
+
+	_, apiErr = h.svc.UpdateApplication(context.Background(), uid, appID, api.UpdateApplicationRequest{Status: db.AppReplied})
+	require.Nil(t, apiErr)
+	require.Len(t, events.got, 1)
+	assert.Equal(t, core.EventApplicationReplied, events.got[0].name)
+	assert.Equal(t, map[string]any{"user_id": uid}, events.got[0].payload, "nothing but who")
+
+	_, apiErr = h.svc.UpdateApplication(context.Background(), uid, appID, api.UpdateApplicationRequest{Status: db.AppReplied})
+	require.Nil(t, apiErr)
+	assert.Len(t, events.got, 1, "marking it again is not a new answer")
+
+	_, apiErr = h.svc.UpdateApplication(context.Background(), uid, appID, api.UpdateApplicationRequest{Status: db.AppClosed})
+	require.Nil(t, apiErr)
+	assert.Len(t, events.got, 1, "other states announce nothing")
+
+	events.err = errors.New("broker down")
+	_, apiErr = h.svc.UpdateApplication(context.Background(), uid, appID, api.UpdateApplicationRequest{Status: db.AppReplied})
+	require.Nil(t, apiErr, "a failed publish does not fail the change")
+}

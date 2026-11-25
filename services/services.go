@@ -46,16 +46,18 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Google:   google.New(config.GoogleClientID, config.GoogleClientSecret, config.GoogleRedirectURL),
 	}
 	gmail := NewGmailService(repos.Gmail, clients.Google, config)
+	// One publisher for the service: emails sent or failed, first applications, replies.
+	events := core.NewPublisher(config.RabbitMQURL)
 	emails := NewEmailService(EmailDeps{
 		Repo: repos.Email, Gmail: gmail, Mailer: clients.Google, Drafter: clients.Ai, Jobs: clients.Job,
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
-		Events: core.NewPublisher(config.RabbitMQURL), Config: config, Drafts: repos.Draft,
+		Events: events, Config: config, Drafts: repos.Draft,
 	})
 	return &Services{
 		Erase:       NewEraseService(repos.Erase),
 		Gmail:       gmail,
 		Email:       emails,
-		Application: NewApplicationService(repos.Application, emails, clients.Job),
+		Application: NewApplicationService(repos.Application, emails, clients.Job, events),
 		Match: NewMatchService(MatchDeps{
 			Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
 		}),

@@ -73,3 +73,7 @@ go run main.go
 ## AI analysis of an offer
 
 `POST /applications/match` reads the offer (job-api) and the CV as text (resume-api), and asks ai-api how well they fit. The reading is kept in `job_matches` (migration `0006`) under a digest of what the AI read: asking again for the same offer and the same CV returns it without asking the AI nor counting it; a changed CV or offer is read again. The plan's `ai_matches_per_month` limits the readings made in a calendar month (absent: no limit; `0`: 402). An empty CV is a 422 and is not sent. The readings go with the account when it is deleted.
+
+## Replies
+
+When a student marks an application as answered by the company (`PATCH /applications/:id` with `replied`, from another state), `application.replied` (`user_id` only) is published: statistics-api counts it as `replies`. Marking it again announces nothing; a failed publish never fails the change.
