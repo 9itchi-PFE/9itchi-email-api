@@ -33,7 +33,8 @@ func (c *Client) Draft(ctx context.Context, bearer string, in core.DraftInput) (
 		Body    string `json:"body"`
 	}
 	err := httpx.Do(ctx, c.HTTP, httpx.Request{
-		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/ai/emails/draft"), Bearer: bearer,
+		// The internal key is what ai-api checks now; the bearer is kept until every ai-api has the internal route.
+		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/ai/emails/draft"), Bearer: bearer, APIKey: c.APIKey,
 		Body: map[string]string{
 			"job_title": in.JobTitle, "company": in.Company, "job_description": in.JobDescription,
 			"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone,

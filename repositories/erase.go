@@ -5,7 +5,7 @@ import "context"
 // EraseRepository removes what this service keeps about one user, when their account is deleted.
 type EraseRepository interface {
 	// EraseUser deletes the applications, the emails (the scheduled ones never leave), the Gmail connection with its
-	// tokens, and the AI's readings of the student's CV against offers.
+	// tokens, the AI's readings of the student's CV against offers and the letters the AI wrote.
 	// It returns how many rows went. Erasing a user who has nothing here, or twice, is not an error.
 	EraseUser(ctx context.Context, userID string) (int64, error)
 }
@@ -24,6 +24,7 @@ var eraseStatements = []string{
 	`DELETE FROM emails WHERE user_id = $1`,
 	`DELETE FROM gmail_connections WHERE user_id = $1`,
 	`DELETE FROM job_matches WHERE user_id = $1`,
+	`DELETE FROM ai_drafts WHERE user_id = $1`,
 }
 
 func (r *eraseRepository) EraseUser(ctx context.Context, userID string) (int64, error) {

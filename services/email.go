@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -60,6 +62,7 @@ type EmailDeps struct {
 	Tracker   core.Tracker
 	Scheduler core.Scheduler
 	Quotas    core.QuotaSource
+	Drafts    repositories.DraftRepository
 	Events    core.Publisher
 	Config    utils.AppConfig
 	Now       func() time.Time
@@ -122,14 +125,83 @@ func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.Dr
 			return nil, peerError(err, "resume not found")
 		}
 	}
+	language, tone := req.Language, req.Tone
+	if language == "" {
+		language = "fr"
+	}
+	if tone == "" {
+		tone = "formal"
+	}
+	hash := digest(job.Title, job.Company, job.Description, summary)
+	if !req.Fresh {
+		d, err := s.Drafts.Latest(ctx, userID, req.JobID, hash, language, tone)
+		switch {
+		case err == nil:
+			return s.draftResponse(ctx, userID, d.Subject, d.Body)
+		case !errors.Is(err, repositories.ErrNotFound):
+			return nil, repoError(err, "draft not found")
+		}
+	}
+	limit, used, apiErr := s.monthlyUse(ctx, userID, core.QuotaAIDrafts, s.Drafts.CountSince)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	switch {
+	case limit != nil && *limit == 0:
+		return nil, apiError(http.StatusPaymentRequired, "the AI letter is part of the subscription")
+	case limit != nil && used >= *limit:
+		return nil, apiError(http.StatusPaymentRequired, "monthly limit of AI letters of your plan reached")
+	}
 	subject, body, err := s.Drafter.Draft(ctx, token, core.DraftInput{
 		JobTitle: job.Title, Company: job.Company, JobDescription: job.Description,
-		CandidateSummary: summary, Language: req.Language, Tone: req.Tone,
+		CandidateSummary: summary, Language: language, Tone: tone,
 	})
 	if err != nil {
 		return nil, peerError(err, "job not found")
 	}
-	return &api.DraftEmailResponse{Subject: subject, Body: body}, nil
+	if _, err := s.Drafts.Save(ctx, &db.AIDraft{
+		UserID: userID, JobID: req.JobID, Language: language, Tone: tone, InputHash: hash, Subject: subject, Body: body,
+	}); err != nil {
+		return nil, repoError(err, "draft not found")
+	}
+	return s.draftResponse(ctx, userID, subject, body)
+}
+
+func (s *emailService) draftResponse(ctx context.Context, userID, subject, body string) (*api.DraftEmailResponse, *models.ApiError) {
+	limit, used, apiErr := s.monthlyUse(ctx, userID, core.QuotaAIDrafts, s.Drafts.CountSince)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	return &api.DraftEmailResponse{Subject: subject, Body: body, Limit: limit, Used: used}, nil
+}
+
+// monthlyUse is the plan's monthly limit for key and how much of it the user used this calendar month (UTC);
+// limit is nil when the plan sets none.
+func (s *emailService) monthlyUse(ctx context.Context, userID, key string, count func(context.Context, string, time.Time) (int, error)) (*int, int, *models.ApiError) {
+	quotas, err := s.Quotas.Quotas(ctx, userID)
+	if err != nil {
+		return nil, 0, peerError(err, "plan not found")
+	}
+	limit, ok := quotas[key]
+	if !ok || limit < 0 {
+		return nil, 0, nil
+	}
+	now := s.Now().UTC()
+	n, err := count(ctx, userID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		return nil, 0, repoError(err, "not found")
+	}
+	return &limit, n, nil
+}
+
+// digest is the SHA-256 of what the AI reads, parts separated so that moving text between them changes it.
+func digest(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Allowance modes: how the user's applications leave.
