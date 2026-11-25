@@ -24,6 +24,7 @@ Port `8085`, health `/health`.
 | GET | `/internal/emails/:id/context` | internal | EmailContext (the offer an email was sent for: `application_id`, `job_id`, `job_title`, `company`; 404 when it was sent for no application) |
 | POST | `/applications` | user | Apply (201) |
 | GET | `/applications` | user | ListApplications |
+| GET | `/applications/allowance` | user | Allowance |
 | PATCH | `/applications/:id` | user | UpdateApplication |
 | POST | `/applications/:id/send` | user | SendApplicationNow |
 
@@ -37,6 +38,8 @@ Port `8085`, health `/health`.
 The CV is the one resume-api renders at that moment (`GET /internal/resumes/:id/pdf`); when it cannot be attached the email is not sent (`502`, a scheduled one becomes `failed`).
 
 One live application per offer: `409` when one is already scheduled, sent or answered, and when the offer is closed. `409` also when Gmail is not connected, `402` when the plan's monthly email limit is reached.
+
+**Without a subscription** (the plan's `emails_per_month` is `0`) a student still sends `free_applications` applications (plan quota, payments-api) over the whole life of the account. Those leave with the file the student imported (`GET /internal/resumes/:id/original` of resume-api, its own name and type), never the CV built in 9itchi; the email is marked `cv_original`. Emails sent, being sent or scheduled count; failed and cancelled ones do not. `402` once they are used up, `422` when the CV has no imported file. `GET /applications/allowance` answers `{"mode": "plan" | "original" | "none", "limit": n | null, "used": n}` so the screen can say what will leave and how many are left.
 
 Each application keeps the `job_title` and `company` of its offer (offers are removed once expired) and its channel `via`. Its `status` is `scheduled`, `sent`, `opened`, `replied`, `withdrawn`, `closed`, or `failed` when a scheduled email could not leave.
 

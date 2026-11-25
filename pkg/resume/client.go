@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -77,29 +78,50 @@ func (c *Client) Summary(ctx context.Context, bearer, id string) (string, error)
 
 // PDF calls GET /internal/resumes/:id/pdf: the CV as it is now. It returns nil when the CV does not exist.
 func (c *Client) PDF(ctx context.Context, id string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpx.URL(c.BaseURL, "/internal/resumes/"+url.PathEscape(id)+"/pdf"), nil)
-	if err != nil {
+	data, _, err := c.file(ctx, "/internal/resumes/"+url.PathEscape(id)+"/pdf")
+	return data, err
+}
+
+// Original calls GET /internal/resumes/:id/original: the file the student imported, as it came, with its own
+// name and type. It returns nil when the CV has none.
+func (c *Client) Original(ctx context.Context, id string) (*core.Attachment, error) {
+	data, h, err := c.file(ctx, "/internal/resumes/"+url.PathEscape(id)+"/original")
+	if err != nil || data == nil {
 		return nil, err
+	}
+	name := "CV"
+	if _, params, err := mime.ParseMediaType(h.Get("Content-Disposition")); err == nil && strings.TrimSpace(params["filename"]) != "" {
+		name = params["filename"]
+	}
+	return &core.Attachment{Filename: name, ContentType: h.Get("Content-Type"), Data: data}, nil
+}
+
+// file reads one file from resume-api. Nil data without an error means there is no such file (404) or it is
+// larger than an email can carry.
+func (c *Client) file(ctx context.Context, path string) ([]byte, http.Header, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpx.URL(c.BaseURL, path), nil)
+	if err != nil {
+		return nil, nil, err
 	}
 	req.Header.Set("x-api-key", c.APIKey)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, core.ErrPeerUnavailable
+		return nil, nil, core.ErrPeerUnavailable
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("%w: status %d", core.ErrPeerUnavailable, resp.StatusCode)
+		return nil, nil, fmt.Errorf("%w: status %d", core.ErrPeerUnavailable, resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxPDFBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(data) > maxPDFBytes {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return data, nil
+	return data, resp.Header, nil
 }

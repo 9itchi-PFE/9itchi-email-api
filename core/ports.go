@@ -15,8 +15,14 @@ var (
 	ErrGmailAuth = errors.New("gmail authorization failed")
 )
 
-// QuotaEmailsPerMonth is the key of the monthly email limit in the payments plan quotas.
-const QuotaEmailsPerMonth = "emails_per_month"
+// Keys of the payments plan quotas read here.
+const (
+	// QuotaEmailsPerMonth is the monthly limit of applications sent with the CV built in 9itchi.
+	QuotaEmailsPerMonth = "emails_per_month"
+	// QuotaFreeApplications applies when the monthly limit is 0 (no subscription): how many applications still
+	// leave, over the whole life of the account, with the file the student imported.
+	QuotaFreeApplications = "free_applications"
+)
 
 // GoogleToken is an OAuth2 token pair stored (encrypted) per user.
 type GoogleToken struct {
@@ -28,7 +34,9 @@ type GoogleToken struct {
 // Attachment is a file sent with an email.
 type Attachment struct {
 	Filename string
-	Data     []byte
+	// ContentType of the file; empty means a PDF.
+	ContentType string
+	Data        []byte
 }
 
 // MailMessage is one outgoing email: an HTML body and an optional PDF.
@@ -90,6 +98,8 @@ type ResumeSource interface {
 	Summary(ctx context.Context, bearer, id string) (string, error)
 	// PDF is the latest exported PDF of the CV, nil when none was exported.
 	PDF(ctx context.Context, id string) ([]byte, error)
+	// Original is the file the student imported for the CV, as it came; nil when the CV has none.
+	Original(ctx context.Context, id string) (*Attachment, error)
 }
 
 // Tracker calls 9itchi-tracker-api.
@@ -105,6 +115,7 @@ type Scheduler interface {
 
 // QuotaSource calls 9itchi-payments-api.
 type QuotaSource interface {
-	// Limit returns the plan limit for key; ok is false when the plan has none.
-	Limit(ctx context.Context, userID, key string) (limit int, ok bool, err error)
+	// Quotas returns the limits of the user's plan (the active one, else the plan without subscription). A key
+	// that is absent sets no limit.
+	Quotas(ctx context.Context, userID string) (map[string]int, error)
 }

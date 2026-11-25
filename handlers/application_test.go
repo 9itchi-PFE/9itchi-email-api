@@ -186,3 +186,25 @@ func TestEmailContextHandler(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Contains(t, w.Body.String(), `"error"`)
 }
+
+type mockAllowance struct {
+	services.EmailService
+	failing *models.ApiError
+}
+
+func (m mockAllowance) Allowance(context.Context, string) (*api.AllowanceResponse, *models.ApiError) {
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	five := 5
+	return &api.AllowanceResponse{Mode: services.AllowOriginal, Limit: &five, Used: 2}, nil
+}
+
+func TestAllowanceHandler(t *testing.T) {
+	w := call(Allowance(mockAllowance{}), http.MethodGet, "/applications/allowance", "/applications/allowance", "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"mode":"original","limit":5,"used":2}`, w.Body.String())
+
+	w = call(Allowance(mockAllowance{failing: &models.ApiError{Code: http.StatusBadGateway, Error: assert.AnError}}), http.MethodGet, "/applications/allowance", "/applications/allowance", "")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+}

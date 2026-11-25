@@ -116,6 +116,19 @@ func (m *memEmails) CountSentSince(context.Context, string, time.Time) (int, err
 	return m.sent, nil
 }
 
+// CountOriginal counts like the repository: the emails that carry the imported file and left or are about to.
+func (m *memEmails) CountOriginal(_ context.Context, userID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, e := range m.rows {
+		if e.UserID == userID && e.CVOriginal && (e.Status == db.EmailSent || e.Status == db.EmailSending || e.Status == db.EmailScheduled) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 type fakeGmail struct {
 	GmailService
 	err *models.ApiError
@@ -148,6 +161,13 @@ func (f fakeTracker) Register(context.Context, string, string) (string, string, 
 type fakeResumes struct {
 	pdf []byte
 	err error
+	// original is the imported file; originalErr fails its read.
+	original    *core.Attachment
+	originalErr error
+}
+
+func (f fakeResumes) Original(context.Context, string) (*core.Attachment, error) {
+	return f.original, f.originalErr
 }
 
 func (f fakeResumes) Summary(context.Context, string, string) (string, error) {
@@ -205,13 +225,26 @@ func (f *fakeScheduler) Cancel(_ context.Context, id string) error {
 	return nil
 }
 
+// fakeQuota is a plan: its monthly limit (when ok), and the applications it gives without a subscription.
 type fakeQuota struct {
 	limit int
 	ok    bool
+	free  int
+	err   error
 }
 
-func (f fakeQuota) Limit(context.Context, string, string) (int, bool, error) {
-	return f.limit, f.ok, nil
+func (f fakeQuota) Quotas(context.Context, string) (map[string]int, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	q := map[string]int{}
+	if f.ok {
+		q[core.QuotaEmailsPerMonth] = f.limit
+	}
+	if f.free != 0 {
+		q[core.QuotaFreeApplications] = f.free
+	}
+	return q, nil
 }
 
 type harness struct {
@@ -241,10 +274,14 @@ func (r *recordedEvents) Publish(_ context.Context, name string, payload any) er
 }
 
 func newHarness(gmailErr *models.ApiError, quota fakeQuota) *harness {
+	return newHarnessWith(gmailErr, quota, fakeResumes{pdf: []byte("%PDF")})
+}
+
+func newHarnessWith(gmailErr *models.ApiError, quota fakeQuota, resumes fakeResumes) *harness {
 	h := &harness{repo: newMemEmails(), mailer: &fakeMailer{}, sched: &fakeScheduler{}, draft: &fakeDrafter{}, events: &recordedEvents{}}
 	h.svc = NewEmailService(EmailDeps{
 		Repo: h.repo, Gmail: fakeGmail{err: gmailErr}, Mailer: h.mailer, Drafter: h.draft, Jobs: fakeJobs{},
-		Resumes: fakeResumes{pdf: []byte("%PDF")}, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: quota,
+		Resumes: resumes, Tracker: fakeTracker{}, Scheduler: h.sched, Quotas: quota,
 		Events: h.events,
 		Config: testCfg, Now: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	})
@@ -516,4 +553,103 @@ func TestEmailFailureEventAndBrokerDown(t *testing.T) {
 	sent, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailSent, sent.Status)
+}
+
+// noPlan is a student without a subscription: nothing per month, two applications with the imported file.
+var noPlan = fakeQuota{limit: 0, ok: true, free: 2}
+
+func imported() fakeResumes {
+	return fakeResumes{pdf: []byte("%PDF built in 9itchi"), original: &core.Attachment{
+		Filename: "cv-ines.docx", ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Data: []byte("as imported"),
+	}}
+}
+
+func TestSendWithoutSubscriptionCarriesTheImportedFile(t *testing.T) {
+	h := newHarnessWith(nil, noPlan, imported())
+	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.Equal(t, db.EmailSent, e.Status)
+	assert.True(t, e.CVOriginal)
+	require.Len(t, h.mailer.sent, 1)
+	att := h.mailer.sent[0].Attachment
+	require.NotNil(t, att)
+	assert.Equal(t, "cv-ines.docx", att.Filename)
+	assert.Equal(t, []byte("as imported"), att.Data, "the CV built in 9itchi is not sent without a subscription")
+	assert.Contains(t, att.ContentType, "wordprocessingml")
+
+	a, apiErr := h.svc.Allowance(context.Background(), uid)
+	require.Nil(t, apiErr)
+	require.NotNil(t, a.Limit)
+	assert.Equal(t, api.AllowanceResponse{Mode: AllowOriginal, Limit: a.Limit, Used: 1}, *a)
+	assert.Equal(t, 2, *a.Limit)
+
+	// The second one may be scheduled: it counts before it leaves.
+	at := time.Date(2026, 5, 12, 8, 30, 0, 0, time.UTC)
+	s, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
+	require.Nil(t, apiErr)
+	assert.True(t, s.CVOriginal)
+
+	// The third is refused, and nothing is stored or sent for it.
+	_, apiErr = h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 402, apiErr.Code)
+	assert.Len(t, h.repo.rows, 2)
+	assert.Len(t, h.mailer.sent, 1)
+
+	// The scheduled one leaves with the imported file too.
+	out, apiErr := h.svc.DispatchScheduled(context.Background(), s.ID)
+	require.Nil(t, apiErr)
+	assert.Equal(t, db.EmailSent, out.Status)
+	assert.Equal(t, []byte("as imported"), h.mailer.sent[1].Attachment.Data)
+}
+
+func TestSendWithoutSubscriptionNeedsAnImportedFile(t *testing.T) {
+	// A CV that was not started from a file: said before anything is stored.
+	h := newHarnessWith(nil, noPlan, fakeResumes{pdf: []byte("%PDF")})
+	_, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 422, apiErr.Code)
+	assert.Empty(t, h.repo.rows)
+
+	h = newHarnessWith(nil, noPlan, fakeResumes{originalErr: core.ErrPeerUnavailable})
+	_, apiErr = h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 502, apiErr.Code)
+	assert.Empty(t, h.repo.rows)
+}
+
+func TestSubscriberStillSendsTheBuiltCV(t *testing.T) {
+	h := newHarnessWith(nil, fakeQuota{limit: 5, ok: true, free: 2}, imported())
+	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.False(t, e.CVOriginal)
+	assert.Equal(t, "CV.pdf", h.mailer.sent[0].Attachment.Filename)
+	assert.Equal(t, []byte("%PDF built in 9itchi"), h.mailer.sent[0].Attachment.Data)
+}
+
+func TestAllowance(t *testing.T) {
+	five := 5
+	for name, tc := range map[string]struct {
+		quota fakeQuota
+		sent  int
+		want  api.AllowanceResponse
+	}{
+		"no limit in the plan":     {fakeQuota{}, 0, api.AllowanceResponse{Mode: AllowPlan}},
+		"unlimited":                {unlimited, 9, api.AllowanceResponse{Mode: AllowPlan}},
+		"monthly limit":            {fakeQuota{limit: 5, ok: true}, 3, api.AllowanceResponse{Mode: AllowPlan, Limit: &five, Used: 3}},
+		"no subscription, nothing": {fakeQuota{limit: 0, ok: true}, 0, api.AllowanceResponse{Mode: AllowNone}},
+		"no subscription, five":    {fakeQuota{limit: 0, ok: true, free: 5}, 3, api.AllowanceResponse{Mode: AllowOriginal, Limit: &five}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(nil, tc.quota)
+			h.repo.sent = tc.sent
+			got, apiErr := h.svc.Allowance(context.Background(), uid)
+			require.Nil(t, apiErr)
+			assert.Equal(t, tc.want, *got)
+		})
+	}
+	h := newHarness(nil, fakeQuota{err: core.ErrPeerUnavailable})
+	_, apiErr := h.svc.Allowance(context.Background(), uid)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, 502, apiErr.Code)
 }

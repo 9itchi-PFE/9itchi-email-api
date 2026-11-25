@@ -41,6 +41,8 @@ type EmailService interface {
 	CancelEmail(ctx context.Context, userID string, id string) (*db.Email, *models.ApiError)
 	// SendNow delivers a scheduled email of the user right away and drops its schedule task
 	SendNow(ctx context.Context, userID string, id string) (*db.Email, *models.ApiError)
+	// GET /applications/allowance: what the user's plan lets them send, and how much of it is used
+	Allowance(ctx context.Context, userID string) (*api.AllowanceResponse, *models.ApiError)
 	// POST /internal/emails/:id/dispatch: called by schedule-api when due
 	DispatchScheduled(ctx context.Context, id string) (*db.Email, *models.ApiError)
 }
@@ -128,36 +130,88 @@ func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.Dr
 	return &api.DraftEmailResponse{Subject: subject, Body: body}, nil
 }
 
-// checkQuota enforces the plan's monthly email limit (negative = unlimited).
-func (s *emailService) checkQuota(ctx context.Context, userID string) *models.ApiError {
-	limit, ok, err := s.Quotas.Limit(ctx, userID, core.QuotaEmailsPerMonth)
+// Allowance modes: how the user's applications leave.
+const (
+	// AllowPlan: with the CV built in 9itchi, within the monthly limit of the plan.
+	AllowPlan = "plan"
+	// AllowOriginal: no subscription; a few applications over the life of the account, with the imported file.
+	AllowOriginal = "original"
+	// AllowNone: the plan sends nothing.
+	AllowNone = "none"
+)
+
+// allowance reads what the user's plan lets them send and how much of it is used. Limit is nil when unlimited.
+func (s *emailService) allowance(ctx context.Context, userID string) (*api.AllowanceResponse, *models.ApiError) {
+	quotas, err := s.Quotas.Quotas(ctx, userID)
 	if err != nil {
-		return peerError(err, "plan not found")
+		return nil, peerError(err, "plan not found")
 	}
-	if !ok || limit < 0 {
-		return nil
+	monthly, ok := quotas[core.QuotaEmailsPerMonth]
+	if !ok || monthly < 0 {
+		return &api.AllowanceResponse{Mode: AllowPlan}, nil
 	}
-	now := s.Now().UTC()
-	n, err := s.Repo.CountSentSince(ctx, userID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
+	if monthly > 0 {
+		now := s.Now().UTC()
+		n, err := s.Repo.CountSentSince(ctx, userID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
+		if err != nil {
+			return nil, repoError(err, "email not found")
+		}
+		return &api.AllowanceResponse{Mode: AllowPlan, Limit: &monthly, Used: n}, nil
+	}
+	free := quotas[core.QuotaFreeApplications]
+	if free <= 0 {
+		return &api.AllowanceResponse{Mode: AllowNone}, nil
+	}
+	n, err := s.Repo.CountOriginal(ctx, userID)
 	if err != nil {
-		return repoError(err, "email not found")
+		return nil, repoError(err, "email not found")
 	}
-	if n >= limit {
-		return apiError(http.StatusPaymentRequired, "monthly email limit of your plan reached")
+	return &api.AllowanceResponse{Mode: AllowOriginal, Limit: &free, Used: n}, nil
+}
+
+func (s *emailService) Allowance(ctx context.Context, userID string) (*api.AllowanceResponse, *models.ApiError) {
+	return s.allowance(ctx, userID)
+}
+
+// checkQuota enforces the plan: the monthly limit of a subscription, or without one the few applications that
+// leave with the imported file. original says the email must carry that file.
+func (s *emailService) checkQuota(ctx context.Context, userID string) (original bool, apiErr *models.ApiError) {
+	a, apiErr := s.allowance(ctx, userID)
+	if apiErr != nil {
+		return false, apiErr
 	}
-	return nil
+	switch {
+	case a.Mode == AllowNone:
+		return false, apiError(http.StatusPaymentRequired, "sending applications is part of the subscription")
+	case a.Limit != nil && a.Used >= *a.Limit && a.Mode == AllowOriginal:
+		return false, apiError(http.StatusPaymentRequired, "the applications without a subscription are used up")
+	case a.Limit != nil && a.Used >= *a.Limit:
+		return false, apiError(http.StatusPaymentRequired, "monthly email limit of your plan reached")
+	}
+	return a.Mode == AllowOriginal, nil
 }
 
 func (s *emailService) create(ctx context.Context, userID string, req api.SendEmailRequest, status string, at *time.Time) (*db.Email, *models.ApiError) {
 	if _, _, apiErr := s.Gmail.Credentials(ctx, userID); apiErr != nil {
 		return nil, apiErr
 	}
-	if apiErr := s.checkQuota(ctx, userID); apiErr != nil {
+	original, apiErr := s.checkQuota(ctx, userID)
+	if apiErr != nil {
 		return nil, apiErr
+	}
+	if original && req.ResumeID != "" {
+		// Said now, while the student can still do something about it, and not when the email fails to leave.
+		f, err := s.Resumes.Original(ctx, req.ResumeID)
+		if err != nil {
+			return nil, peerError(err, "resume not found")
+		}
+		if f == nil {
+			return nil, apiError(http.StatusUnprocessableEntity, "this CV has no imported file to send")
+		}
 	}
 	e, err := s.Repo.Create(ctx, &db.Email{
 		UserID: userID, JobID: optional(req.JobID), ResumeID: optional(req.ResumeID), Recipient: req.To,
-		Subject: strings.TrimSpace(req.Subject), Body: req.Body, Status: status, ScheduledAt: at,
+		Subject: strings.TrimSpace(req.Subject), Body: req.Body, Status: status, ScheduledAt: at, CVOriginal: original,
 	})
 	if err != nil {
 		return nil, repoError(err, "email not found")
@@ -311,14 +365,14 @@ func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (
 	if e.ResumeID != nil {
 		// An application that says « CV attached » never leaves without it: better a failed send the student
 		// sees and retries than a recruiter who receives no CV.
-		pdf, err := s.Resumes.PDF(ctx, *e.ResumeID)
-		if err != nil || len(pdf) == 0 {
+		att, err := s.attachment(ctx, e)
+		if err != nil || att == nil {
 			if err == nil {
-				err = errors.New("resume has no pdf")
+				err = errors.New("resume has no file to attach")
 			}
 			return fail(apiError(http.StatusBadGateway, "the CV could not be attached"), err)
 		}
-		msg.Attachment = &core.Attachment{Filename: "CV.pdf", Data: pdf}
+		msg.Attachment = att
 	}
 	if err := s.Mailer.Send(ctx, accessToken, msg); err != nil {
 		if errors.Is(err, core.ErrGmailAuth) {
@@ -333,6 +387,19 @@ func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (
 	s.publish(ctx, core.EventEmailSent, e, scheduled)
 	e.Status, e.SentAt = db.EmailSent, &sentAt
 	return e, nil
+}
+
+// attachment is the CV an email carries: the file the student imported for an application without a
+// subscription, else the CV as it is now in 9itchi. Nil when there is none.
+func (s *emailService) attachment(ctx context.Context, e *db.Email) (*core.Attachment, error) {
+	if e.CVOriginal {
+		return s.Resumes.Original(ctx, *e.ResumeID)
+	}
+	pdf, err := s.Resumes.PDF(ctx, *e.ResumeID)
+	if err != nil || len(pdf) == 0 {
+		return nil, err
+	}
+	return &core.Attachment{Filename: "CV.pdf", Data: pdf}, nil
 }
 
 // renderHTML turns the plain-text body into HTML (escaped) and appends the tracking pixel.

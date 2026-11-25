@@ -212,8 +212,17 @@ func BuildMIME(m core.MailMessage) ([]byte, error) {
 	name := mime.QEncoding.Encode("utf-8", strings.NewReplacer("\r", "", "\n", "", "\"", "").Replace(m.Attachment.Filename))
 	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", boundary)
 	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n", boundary, html)
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: application/pdf; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n",
-		boundary, name, name, base64Lines(m.Attachment.Data), boundary)
+	// The type comes from resume-api, which only stores PDF and DOCX; anything unexpected is sent as a plain file.
+	ctype := "application/pdf"
+	if t := m.Attachment.ContentType; t != "" {
+		if parsed, _, err := mime.ParseMediaType(t); err == nil {
+			ctype = parsed
+		} else {
+			ctype = "application/octet-stream"
+		}
+	}
+	fmt.Fprintf(&b, "--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n",
+		boundary, ctype, name, name, base64Lines(m.Attachment.Data), boundary)
 	return b.Bytes(), nil
 }
 

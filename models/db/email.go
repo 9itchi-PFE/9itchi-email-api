@@ -15,6 +15,8 @@ type Email struct {
 	ScheduledAt *time.Time `db:"scheduled_at" json:"scheduled_at"`
 	SentAt      *time.Time `db:"sent_at" json:"sent_at"`
 	TrackingID  string     `db:"tracking_id" json:"tracking_id"`
+	// CVOriginal: the attachment is the file the student imported (an application without a subscription).
+	CVOriginal bool `db:"cv_original" json:"cv_original"`
 	// ScheduleTaskID is the schedule-api task to cancel with a scheduled email.
 	ScheduleTaskID *string   `db:"schedule_task_id" json:"-"`
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`

@@ -38,6 +38,20 @@ func TestBuildMIME(t *testing.T) {
 	assert.Contains(t, s, "filename=\"CV.pdf\"")
 	assert.Contains(t, s, "Subject: =?utf-8?q?")
 
+	assert.Contains(t, s, "Content-Type: application/pdf; name=\"CV.pdf\"")
+
+	// The imported file keeps its own type; a type that cannot be read never reaches the headers as it came.
+	const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	raw, err = BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x",
+		Attachment: &core.Attachment{Filename: "cv.docx", ContentType: docx, Data: []byte("PK")}})
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "Content-Type: "+docx+"; name=\"cv.docx\"")
+	raw, err = BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x",
+		Attachment: &core.Attachment{Filename: "cv.bin", ContentType: "x\r\nBcc: evil@z.tn", Data: []byte("PK")}})
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "Content-Type: application/octet-stream; name=\"cv.bin\"")
+	assert.NotContains(t, string(raw), "evil@z.tn")
+
 	plain, err := BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x"})
 	require.NoError(t, err)
 	assert.NotContains(t, string(plain), "multipart")
