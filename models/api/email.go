@@ -46,18 +46,66 @@ type MatchRequest struct {
 }
 
 // MatchResponse is the AI's reading of the CV against the offer, with what is left of the plan's analyses this
-// month (Limit nil: no limit).
+// month (Limit nil: no limit). Origin "score" is a quick score not yet read as an analysis: its advice is withheld
+// (empty) until POST /applications/match is allowed by the plan.
 type MatchResponse struct {
 	Score           int           `json:"score"`
 	Level           string        `json:"level"`
 	Strengths       []string      `json:"strengths"`
 	Gaps            []string      `json:"gaps"`
 	Advice          string        `json:"advice"`
+	Origin          string        `json:"origin"`
 	Keywords        MatchKeywords `json:"keywords"`
 	KeywordCoverage int           `json:"keyword_coverage"`
 	CreatedAt       time.Time     `json:"created_at"`
 	Limit           *int          `json:"limit"`
 	Used            int           `json:"used"`
+}
+
+// ScoreRequest is the body of POST /applications/scores: quick AI scores of up to 10 offers for one CV.
+type ScoreRequest struct {
+	ResumeID string   `json:"resume_id" binding:"required,uuid"`
+	Language string   `json:"language" binding:"omitempty,oneof=fr en ar"`
+	JobIDs   []string `json:"job_ids" binding:"required,min=1,max=10,dive,uuid"`
+}
+
+// ScoreQuery is GET /applications/scores?resume_id=&job_ids=a,b&language=: the scores already made, nothing asked.
+type ScoreQuery struct {
+	ResumeID string `form:"resume_id" binding:"required,uuid"`
+	Language string `form:"language" binding:"omitempty,oneof=fr en ar"`
+	// JobIDs is a comma-separated list of up to 10 offer ids.
+	JobIDs string `form:"job_ids" binding:"required"`
+}
+
+// Status of one offer in a score answer.
+const (
+	ScoreOK     = "ok"     // scored now, counted in today's limit
+	ScoreCached = "cached" // read before (score or analysis), not counted
+	ScoreQuota  = "quota"  // today's limit of the plan is reached: not scored
+	ScoreError  = "error"  // the offer or the AI failed: not scored, not counted
+)
+
+// ScoreItem is the score of one offer: Reasons are up to 3 of the reading's strengths then gaps. Score and Level are
+// empty unless Status is ok or cached.
+type ScoreItem struct {
+	JobID   string   `json:"job_id"`
+	Score   int      `json:"score"`
+	Level   string   `json:"level"`
+	Reasons []string `json:"reasons"`
+	Status  string   `json:"status"`
+}
+
+// ScoreAllowance is the plan's daily limit of scores (Tunis day; nil: no limit) and how many were made today.
+type ScoreAllowance struct {
+	Limit *int `json:"limit"`
+	Used  int  `json:"used"`
+}
+
+// ScoreResponse answers POST and GET /applications/scores. GET gives only the offers already scored, without
+// allowance.
+type ScoreResponse struct {
+	Items     []ScoreItem     `json:"items"`
+	Allowance *ScoreAllowance `json:"allowance,omitempty"`
 }
 
 // MatchKeywords are the offer's keywords, in the order of the offer, split by whether the CV mentions them.

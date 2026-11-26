@@ -61,13 +61,56 @@ func TestMatchRepository(t *testing.T) {
 
 	_, err = repo.Save(ctx, &db.JobMatch{UserID: user, JobID: job, ResumeID: cv, Language: "en", InputHash: hash, Score: 68, Level: "good"})
 	require.NoError(t, err)
-	n, err := repo.CountSince(ctx, user, time.Now().Add(-time.Hour))
+	n, err := repo.CountSince(ctx, user, db.MatchOriginAnalysis, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 	assert.Equal(t, 3, n)
-	n, err = repo.CountSince(ctx, user, time.Now().Add(time.Hour))
+	n, err = repo.CountSince(ctx, user, db.MatchOriginAnalysis, time.Now().Add(time.Hour))
 	require.NoError(t, err)
 	assert.Zero(t, n)
 
 	_, err = repo.Save(ctx, &db.JobMatch{UserID: user, JobID: job, ResumeID: cv, Language: "fr", InputHash: strings.Repeat("b", 64), Score: 120, Level: "good"})
 	assert.Error(t, err, "the table refuses a score above 100")
+}
+
+func TestMatchRepositoryOrigin(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewMatchRepository(store)
+	const user, job, cv = "00000000-0000-4000-8000-0000000000e1", "00000000-0000-4000-8000-0000000000e3", "00000000-0000-4000-8000-0000000000e4"
+	hour := time.Now().Add(-time.Hour)
+
+	a, err := repo.Save(ctx, &db.JobMatch{UserID: user, JobID: job, ResumeID: cv, Language: "fr", InputHash: strings.Repeat("a", 64), Score: 50, Level: "partial"})
+	require.NoError(t, err)
+	assert.Equal(t, db.MatchOriginAnalysis, a.Origin, "no origin is an analysis")
+	s, err := repo.Save(ctx, &db.JobMatch{UserID: user, JobID: job, ResumeID: cv, Language: "fr", InputHash: strings.Repeat("b", 64),
+		Score: 61, Level: "good", Advice: "old", Origin: db.MatchOriginScore})
+	require.NoError(t, err)
+	assert.Equal(t, db.MatchOriginScore, s.Origin)
+	_, err = repo.Save(ctx, &db.JobMatch{UserID: user, JobID: job, ResumeID: cv, Language: "fr", InputHash: strings.Repeat("c", 64), Score: 1, Level: "weak", Origin: "other"})
+	assert.Error(t, err, "the table refuses an unknown origin")
+
+	n, err := repo.CountSince(ctx, user, db.MatchOriginScore, hour)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	n, err = repo.CountSince(ctx, user, db.MatchOriginAnalysis, hour)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	up, err := repo.Upgrade(ctx, &db.JobMatch{ID: s.ID, UserID: user, Score: 70, Level: "good", Advice: "new", Gaps: []string{"Docker"}})
+	require.NoError(t, err)
+	assert.Equal(t, s.ID, up.ID)
+	assert.Equal(t, db.MatchOriginAnalysis, up.Origin)
+	assert.Equal(t, 70, up.Score)
+	assert.Equal(t, "new", up.Advice)
+	assert.Equal(t, []string{"Docker"}, up.Gaps)
+	assert.Equal(t, []string{}, up.Strengths)
+	assert.False(t, up.CreatedAt.Before(s.CreatedAt), "counted when upgraded")
+	n, err = repo.CountSince(ctx, user, db.MatchOriginAnalysis, hour)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+
+	_, err = repo.Upgrade(ctx, &db.JobMatch{ID: s.ID, UserID: user, Score: 1, Level: "weak"})
+	assert.ErrorIs(t, err, ErrNotFound, "an analysis is not upgraded again")
+	_, err = repo.Upgrade(ctx, &db.JobMatch{ID: a.ID, UserID: "00000000-0000-4000-8000-0000000000e2", Score: 1, Level: "weak"})
+	assert.ErrorIs(t, err, ErrNotFound, "another student's row is not touched")
 }

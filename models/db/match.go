@@ -24,5 +24,13 @@ type JobMatch struct {
 	Keywords  MatchKeywords
 	// KeywordCoverage is the share of the offer's keywords the CV mentions, 0 to 100.
 	KeywordCoverage int
-	CreatedAt       time.Time
+	// Origin is MatchOriginAnalysis or MatchOriginScore (empty is saved as an analysis).
+	Origin    string
+	CreatedAt time.Time
 }
+
+// Why a reading was made: the full analysis of one offer (monthly limit) or a quick score of a list (daily limit).
+const (
+	MatchOriginAnalysis = "analysis"
+	MatchOriginScore    = "score"
+)
