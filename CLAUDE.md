@@ -18,7 +18,7 @@ Applications from the student's own Gmail: OAuth (send-only), AI letter draft, A
 - Internal: `DELETE /internal/users/:id`, `POST /internal/emails/:id/dispatch` (schedule-api), `GET /internal/emails/:id/context` (notification-api).
 
 ## Data, peers, events
-- Tables: `gmail_connections` (tokens AES-GCM, `utils/crypto.go`), `emails`, `applications`, `job_matches`, `ai_drafts`. No bytea: CV fetched from resume-api at send time. Latest `0007_ai_drafts.sql`.
+- Tables: `gmail_connections` (tokens AES-GCM, `utils/crypto.go`), `emails`, `applications`, `job_matches`, `ai_drafts`. No bytea: CV fetched from resume-api at send time. Latest `0008_match_keywords.sql`.
 - Peers (`pkg/`, shared `pkg/httpx`): ai (`/ai/emails/draft`, `/ai/jobs/match`), resume (`/resumes/:id`, `/internal/resumes/:id/pdf|original`), job (`/jobs/:id`, `/internal/jobs/:id`), tracker (`/internal/tracking`), schedule (`/internal/schedules`), payments (`/internal/quotas/:userId`), Google (`pkg/google`, `core.Mailer`).
 - Publishes `email.sent`, `email.failed` (with `scheduled` flag), `application.first_sent`, `application.replied`. Consumes nothing.
 - Env: `RABBITMQ_URL`, `AI_API_URL`, `RESUME_API_URL`, `JOB_API_URL`, `TRACKER_API_URL`, `SCHEDULE_API_URL`, `PAYMENTS_API_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_REDIRECT_URL`, `CLIENT_URL`, `TRACKER_PUBLIC_URL`.
@@ -30,4 +30,5 @@ Applications from the student's own Gmail: OAuth (send-only), AI letter draft, A
 - Schedule window now+1 min to now+365 d; delivery via schedule-api -> `/internal/emails/:id/dispatch`; non-scheduled status = 409 no-op.
 - Tracker down = send without pixel. Application flagged "CV attached" fails 502 if CV can't be attached.
 - AI draft/match cached, not re-counted: unique `(user_id, job_id, resume_id, language, input_hash)`.
+- Match carries `keywords {matched, missing}` (offer order, computed by ai-api) and `keyword_coverage` 0-100, stored in `job_matches` (`0008`); rows made before read as empty lists and 0.
 - Real Gmail send still untested with real Google credentials.

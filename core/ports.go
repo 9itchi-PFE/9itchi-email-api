@@ -138,13 +138,17 @@ type MatchInput struct {
 	Language       string
 }
 
-// MatchResult is the AI's reading: a score out of 100, its level, strengths, gaps and one piece of advice.
+// MatchResult is the AI's reading: a score out of 100, its level, strengths, gaps and one piece of advice, plus the
+// offer's keywords found or not in the CV and the share found (0 to 100).
 type MatchResult struct {
-	Score     int
-	Level     string
-	Strengths []string
-	Gaps      []string
-	Advice    string
+	Score           int
+	Level           string
+	Strengths       []string
+	Gaps            []string
+	Advice          string
+	KeywordsMatched []string
+	KeywordsMissing []string
+	KeywordCoverage int
 }
 
 // Matcher calls 9itchi-ai-api (internal route).

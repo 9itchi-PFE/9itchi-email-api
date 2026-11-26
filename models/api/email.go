@@ -48,12 +48,20 @@ type MatchRequest struct {
 // MatchResponse is the AI's reading of the CV against the offer, with what is left of the plan's analyses this
 // month (Limit nil: no limit).
 type MatchResponse struct {
-	Score     int       `json:"score"`
-	Level     string    `json:"level"`
-	Strengths []string  `json:"strengths"`
-	Gaps      []string  `json:"gaps"`
-	Advice    string    `json:"advice"`
-	CreatedAt time.Time `json:"created_at"`
-	Limit     *int      `json:"limit"`
-	Used      int       `json:"used"`
+	Score           int           `json:"score"`
+	Level           string        `json:"level"`
+	Strengths       []string      `json:"strengths"`
+	Gaps            []string      `json:"gaps"`
+	Advice          string        `json:"advice"`
+	Keywords        MatchKeywords `json:"keywords"`
+	KeywordCoverage int           `json:"keyword_coverage"`
+	CreatedAt       time.Time     `json:"created_at"`
+	Limit           *int          `json:"limit"`
+	Used            int           `json:"used"`
+}
+
+// MatchKeywords are the offer's keywords, in the order of the offer, split by whether the CV mentions them.
+type MatchKeywords struct {
+	Matched []string `json:"matched"`
+	Missing []string `json:"missing"`
 }

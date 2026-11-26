@@ -53,6 +53,11 @@ func (c *Client) Match(ctx context.Context, in core.MatchInput) (*core.MatchResu
 		Strengths []string `json:"strengths"`
 		Gaps      []string `json:"gaps"`
 		Advice    string   `json:"advice"`
+		Keywords  struct {
+			Matched []string `json:"matched"`
+			Missing []string `json:"missing"`
+		} `json:"keywords"`
+		KeywordCoverage int `json:"keyword_coverage"`
 	}
 	skills := in.JobSkills
 	if skills == nil {
@@ -68,5 +73,12 @@ func (c *Client) Match(ctx context.Context, in core.MatchInput) (*core.MatchResu
 	if err != nil {
 		return nil, err
 	}
-	return &core.MatchResult{Score: out.Score, Level: out.Level, Strengths: out.Strengths, Gaps: out.Gaps, Advice: out.Advice}, nil
+	coverage := out.KeywordCoverage
+	if coverage < 0 || coverage > 100 {
+		coverage = 0
+	}
+	return &core.MatchResult{
+		Score: out.Score, Level: out.Level, Strengths: out.Strengths, Gaps: out.Gaps, Advice: out.Advice,
+		KeywordsMatched: out.Keywords.Matched, KeywordsMissing: out.Keywords.Missing, KeywordCoverage: coverage,
+	}, nil
 }
