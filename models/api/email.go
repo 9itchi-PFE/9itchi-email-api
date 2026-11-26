@@ -8,6 +8,9 @@ type DraftEmailRequest struct {
 	ResumeID string `json:"resume_id" binding:"omitempty,uuid"`
 	Language string `json:"language" binding:"omitempty,oneof=fr en ar"`
 	Tone     string `json:"tone" binding:"omitempty,oneof=formal friendly"`
+	// Goal is what the student wants from the email (« Objectif » on the outreach page); the AI writes the letter
+	// around it. A letter written for another goal is not given back.
+	Goal string `json:"goal" binding:"max=300"`
 	// Fresh asks the AI for a new letter (« Réécrire »); otherwise the last one written for the same offer, CV,
 	// language and tone comes back without being counted.
 	Fresh bool `json:"fresh"`

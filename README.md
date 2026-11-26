@@ -68,7 +68,7 @@ go run main.go
 
 ## AI letters
 
-`POST /emails/draft` keeps each letter the AI writes in `ai_drafts` (migration `0007`), under a digest of the offer and of the CV as the AI read them. Asking again for the same offer, CV, language and tone gives the last letter back without asking the AI nor counting it; `"fresh": true` (« Réécrire ») asks for a new one. The plan's `ai_drafts_per_month` limits the letters written in a calendar month (absent: no limit; `0`: 402 « part of the subscription »; reached: 402 « monthly limit »); the answer carries `limit` and `used`. ai-api's draft route is internal: the call sends the internal key (and still the student's token, until every ai-api has the internal route). Letters are erased with the account.
+`POST /emails/draft` keeps each letter the AI writes in `ai_drafts` (migration `0007`), under a digest of the offer and of the CV as the AI read them. Asking again for the same offer, CV, language and tone gives the last letter back without asking the AI nor counting it; `"fresh": true` (« Réécrire ») asks for a new one. An optional `goal` (« Objectif » of the outreach page, max 300 characters) goes to the AI, which writes the letter around it; it is part of the digest, so a letter written for another goal is not given back. The plan's `ai_drafts_per_month` limits the letters written in a calendar month (absent: no limit; `0`: 402 « part of the subscription »; reached: 402 « monthly limit »); the answer carries `limit` and `used`. ai-api's draft route is internal: the call sends the internal key (and still the student's token, until every ai-api has the internal route). Letters are erased with the account.
 
 ## AI analysis of an offer
 

@@ -132,7 +132,12 @@ func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.Dr
 	if tone == "" {
 		tone = "formal"
 	}
+	goal := strings.TrimSpace(req.Goal)
 	hash := digest(job.Title, job.Company, job.Description, summary)
+	if goal != "" {
+		// Only a letter with a goal hashes it, so the letters already kept for the apply flow stay valid.
+		hash = digest(job.Title, job.Company, job.Description, summary, goal)
+	}
 	if !req.Fresh {
 		d, err := s.Drafts.Latest(ctx, userID, req.JobID, hash, language, tone)
 		switch {
@@ -154,7 +159,7 @@ func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.Dr
 	}
 	subject, body, err := s.Drafter.Draft(ctx, token, core.DraftInput{
 		JobTitle: job.Title, Company: job.Company, JobDescription: job.Description,
-		CandidateSummary: summary, Language: language, Tone: tone,
+		CandidateSummary: summary, Language: language, Tone: tone, Goal: goal,
 	})
 	if err != nil {
 		return nil, peerError(err, "job not found")

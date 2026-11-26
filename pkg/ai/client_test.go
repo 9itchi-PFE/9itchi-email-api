@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,4 +35,23 @@ func TestMatchKeywordsPassThrough(t *testing.T) {
 	require.NoError(t, err, "an older ai-api without keywords still works")
 	assert.Empty(t, res.KeywordsMatched)
 	assert.Zero(t, res.KeywordCoverage, "an out-of-range coverage is dropped")
+}
+
+func TestDraftSendsTheGoal(t *testing.T) {
+	var got map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ai/emails/draft" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"subject":"Candidature","body":"Bonjour"}`))
+	}))
+	defer srv.Close()
+
+	subject, body, err := New(srv.URL, "key").Draft(context.Background(), "token", core.DraftInput{JobTitle: "Stage", Goal: "Un appel"})
+	require.NoError(t, err)
+	assert.Equal(t, "Candidature", subject)
+	assert.Equal(t, "Bonjour", body)
+	assert.Equal(t, "Un appel", got["goal"])
 }

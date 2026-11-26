@@ -501,6 +501,13 @@ func TestDraftEmail(t *testing.T) {
 	assert.Nil(t, out.Limit, "no key in the plan: no limit")
 	assert.Equal(t, "Acme", h.draft.in.Company)
 	assert.Equal(t, "Ines, ENIS", h.draft.in.CandidateSummary)
+	assert.Empty(t, h.draft.in.Goal)
+
+	// The goal reaches the AI, and a letter kept for no goal is not given back for one.
+	_, apiErr = h.svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID, ResumeID: resumID, Language: "fr", Goal: " Un appel de 15 minutes "})
+	require.Nil(t, apiErr)
+	assert.Equal(t, 2, h.draft.calls)
+	assert.Equal(t, "Un appel de 15 minutes", h.draft.in.Goal)
 
 	h.svc.(*emailService).Jobs = fakeJobs{err: core.ErrPeerNotFound}
 	_, apiErr = h.svc.DraftEmail(context.Background(), uid, api.DraftEmailRequest{JobID: jobID})

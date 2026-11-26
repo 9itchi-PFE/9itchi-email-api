@@ -73,6 +73,7 @@ type DraftInput struct {
 	CandidateSummary string
 	Language         string
 	Tone             string
+	Goal             string
 }
 
 // Drafter calls 9itchi-ai-api. bearer is a short-lived token of the user.
