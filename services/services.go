@@ -22,6 +22,7 @@ type Services struct {
 	Email       EmailService
 	Application ApplicationService
 	Match       MatchService
+	Score       ScoreService
 	Recruiter   RecruiterService
 	Clients     *Clients
 }
@@ -63,14 +64,16 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
 		Events: events, Config: config, Drafts: repos.Draft, Offers: clients.Job, Recruiters: repos.Recruiter,
 	})
+	matchDeps := MatchDeps{
+		Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
+	}
 	return &Services{
 		Erase:       NewEraseService(repos.Erase),
 		Gmail:       gmail,
 		Email:       emails,
 		Application: NewApplicationService(repos.Application, emails, clients.Job, events),
-		Match: NewMatchService(MatchDeps{
-			Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
-		}),
+		Match:       NewMatchService(matchDeps),
+		Score:       NewScoreService(matchDeps),
 		Recruiter: NewRecruiterService(RecruiterDeps{
 			Repo: repos.Recruiter, Finder: finder, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
 		}),

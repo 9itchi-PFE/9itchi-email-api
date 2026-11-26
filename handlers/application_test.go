@@ -241,3 +241,54 @@ func TestFollowUpHandlers(t *testing.T) {
 		"/applications/a1/follow-up", `{"subject":"Re: s","body":"b"}`)
 	assert.Equal(t, http.StatusPaymentRequired, w.Code)
 }
+
+// mockScores is a func-field fake of the score service.
+type mockScores struct {
+	ScoreFn func(api.ScoreRequest) (*api.ScoreResponse, *models.ApiError)
+	FindFn  func(api.ScoreQuery) (*api.ScoreResponse, *models.ApiError)
+}
+
+func (m mockScores) Score(_ context.Context, _ string, req api.ScoreRequest) (*api.ScoreResponse, *models.ApiError) {
+	return m.ScoreFn(req)
+}
+
+func (m mockScores) Find(_ context.Context, _ string, q api.ScoreQuery) (*api.ScoreResponse, *models.ApiError) {
+	return m.FindFn(q)
+}
+
+var _ services.ScoreService = mockScores{}
+
+func TestScoreHandlers(t *testing.T) {
+	limit := 3
+	ok := mockScores{
+		ScoreFn: func(req api.ScoreRequest) (*api.ScoreResponse, *models.ApiError) {
+			return &api.ScoreResponse{Items: []api.ScoreItem{{JobID: req.JobIDs[0], Score: 72, Level: "good", Reasons: []string{"React"}, Status: api.ScoreOK}},
+				Allowance: &api.ScoreAllowance{Limit: &limit, Used: 1}}, nil
+		},
+		FindFn: func(q api.ScoreQuery) (*api.ScoreResponse, *models.ApiError) {
+			return &api.ScoreResponse{Items: []api.ScoreItem{{JobID: q.JobIDs, Score: 72, Level: "good", Reasons: []string{}, Status: api.ScoreCached}}}, nil
+		},
+	}
+	w := call(Score(ok), http.MethodPost, "/applications/scores", "/applications/scores", `{"resume_id":"`+job+`","job_ids":["`+job+`"]}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"items":[{"job_id":"`+job+`","score":72,"level":"good","reasons":["React"],"status":"ok"}],"allowance":{"limit":3,"used":1}}`, w.Body.String())
+
+	w = call(FindScores(ok), http.MethodGet, "/applications/scores", "/applications/scores?resume_id="+job+"&job_ids="+job, "")
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"items":[{"job_id":"`+job+`","score":72,"level":"good","reasons":[],"status":"cached"}]}`, w.Body.String())
+
+	eleven := strings.TrimSuffix(strings.Repeat(`"`+job+`",`, 11), ",")
+	for _, body := range []string{``, `{"resume_id":"` + job + `"}`, `{"resume_id":"` + job + `","job_ids":[]}`, `{"resume_id":"` + job + `","job_ids":["x"]}`,
+		`{"resume_id":"` + job + `","job_ids":[` + eleven + `]}`, `{"resume_id":"` + job + `","job_ids":["` + job + `"],"language":"de"}`} {
+		w = call(Score(ok), http.MethodPost, "/applications/scores", "/applications/scores", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code, body)
+	}
+	w = call(FindScores(ok), http.MethodGet, "/applications/scores", "/applications/scores?job_ids="+job, "")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "resume_id is required")
+
+	failing := mockScores{FindFn: func(api.ScoreQuery) (*api.ScoreResponse, *models.ApiError) {
+		return nil, &models.ApiError{Code: http.StatusBadGateway, Error: assert.AnError}
+	}}
+	w = call(FindScores(failing), http.MethodGet, "/applications/scores", "/applications/scores?resume_id="+job+"&job_ids="+job, "")
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+}

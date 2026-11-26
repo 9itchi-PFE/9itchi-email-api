@@ -171,3 +171,37 @@ func FindMatch(svc services.MatchService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// Score: POST /applications/scores (user) quick AI scores of up to 10 offers for one CV, within today's limit.
+func Score(svc services.ScoreService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.ScoreRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.Score(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// FindScores: GET /applications/scores?resume_id=&job_ids=a,b&language= (user) the scores already made, nothing asked.
+func FindScores(svc services.ScoreService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var q api.ScoreQuery
+		if err := c.ShouldBindQuery(&q); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.Find(c.Request.Context(), c.GetString("user_id"), q)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
