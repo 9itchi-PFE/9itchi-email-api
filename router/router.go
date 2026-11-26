@@ -49,6 +49,8 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.GET("/applications/match", handlers.FindMatch(services.Match))
 		userGroup.PATCH("/applications/:id", handlers.UpdateApplication(services.Application))
 		userGroup.POST("/applications/:id/send", handlers.SendApplicationNow(services.Application))
+		userGroup.POST("/applications/:id/follow-up/draft", handlers.DraftFollowUp(services.Application))
+		userGroup.POST("/applications/:id/follow-up", handlers.FollowUp(services.Application))
 		userGroup.POST("/recruiters/search", handlers.SearchRecruiters(services.Recruiter))
 		userGroup.GET("/recruiters", handlers.ListRecruiters(services.Recruiter))
 		userGroup.GET("/recruiters/allowance", handlers.RecruiterAllowance(services.Recruiter))

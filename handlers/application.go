@@ -80,6 +80,40 @@ func SendApplicationNow(svc services.ApplicationService) gin.HandlerFunc {
 	}
 }
 
+// DraftFollowUp: POST /applications/:id/follow-up/draft (user) the AI writes the follow-up of an application.
+func DraftFollowUp(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.FollowUpDraftRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.DraftFollowUp(c.Request.Context(), c.GetString("user_id"), c.Param("id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// FollowUp: POST /applications/:id/follow-up (user) send the follow-up from Gmail to the first email's recipient.
+func FollowUp(svc services.ApplicationService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.FollowUpRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.FollowUp(c.Request.Context(), c.GetString("user_id"), c.Param("id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // EmailContext: GET /internal/emails/:id/context (internal) the offer an email was sent for.
 func EmailContext(svc services.ApplicationService) gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -30,6 +30,20 @@ func (m *mockApplications) Apply(_ context.Context, userID string, req api.Apply
 	}
 	return &api.ApplicationResponse{ID: "a1", JobID: req.JobID, Status: "sent", Via: "gmail"}, nil
 }
+func (m *mockApplications) DraftFollowUp(_ context.Context, _, id string, _ api.FollowUpDraftRequest) (*api.DraftEmailResponse, *models.ApiError) {
+	m.id = id
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	return &api.DraftEmailResponse{Subject: "Re: Candidature", Body: "Bonjour"}, nil
+}
+func (m *mockApplications) FollowUp(_ context.Context, _, id string, _ api.FollowUpRequest) (*api.ApplicationResponse, *models.ApiError) {
+	m.id = id
+	if m.failing != nil {
+		return nil, m.failing
+	}
+	return &api.ApplicationResponse{ID: id, Status: "sent"}, nil
+}
 func (m *mockApplications) EmailContext(_ context.Context, emailID string) (*api.EmailContextResponse, *models.ApiError) {
 	if m.failing != nil {
 		return nil, m.failing
@@ -207,4 +221,23 @@ func TestAllowanceHandler(t *testing.T) {
 
 	w = call(Allowance(mockAllowance{failing: &models.ApiError{Code: http.StatusBadGateway, Error: assert.AnError}}), http.MethodGet, "/applications/allowance", "/applications/allowance", "")
 	assert.Equal(t, http.StatusBadGateway, w.Code)
+}
+
+func TestFollowUpHandlers(t *testing.T) {
+	m := &mockApplications{}
+	w := call(DraftFollowUp(m), http.MethodPost, "/applications/:id/follow-up/draft", "/applications/a1/follow-up/draft", `{"language":"fr"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "a1", m.id)
+	w = call(DraftFollowUp(&mockApplications{}), http.MethodPost, "/applications/:id/follow-up/draft", "/applications/a1/follow-up/draft", `{"language":"de"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+
+	w = call(FollowUp(&mockApplications{}), http.MethodPost, "/applications/:id/follow-up", "/applications/a1/follow-up", `{"subject":"Re: s","body":"b"}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+	for _, body := range []string{``, `{"subject":"s"}`, `{"body":"b"}`} {
+		w = call(FollowUp(&mockApplications{}), http.MethodPost, "/applications/:id/follow-up", "/applications/a1/follow-up", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code, body)
+	}
+	w = call(FollowUp(&mockApplications{failing: &models.ApiError{Code: 402, Error: assert.AnError}}), http.MethodPost, "/applications/:id/follow-up",
+		"/applications/a1/follow-up", `{"subject":"Re: s","body":"b"}`)
+	assert.Equal(t, http.StatusPaymentRequired, w.Code)
 }

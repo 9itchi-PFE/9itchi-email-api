@@ -191,6 +191,10 @@ func (s *emailService) draftForSource(ctx context.Context, userID, source, resum
 		}
 	}
 	hash := digest(in.JobTitle, in.Company, in.JobDescription, in.CandidateSummary)
+	if in.Kind != "" {
+		// Only a follow-up hashes its kind and first email, so the letters already kept stay valid.
+		hash = digest(in.JobTitle, in.Company, in.JobDescription, in.CandidateSummary, in.Kind, in.Previous)
+	}
 	if !fresh {
 		d, err := s.Drafts.LatestByURL(ctx, userID, source, hash, in.Language, in.Tone)
 		switch {

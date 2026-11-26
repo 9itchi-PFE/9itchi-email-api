@@ -5,6 +5,7 @@ package repositories
 import (
 	"context"
 	"testing"
+	"time"
 
 	"9itchi-email-api/models/db"
 
@@ -63,6 +64,25 @@ func TestApplicationRepository(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, "Acme", list[0].Company)
+
+	// The follow-up is recorded once; applying again to the offer starts over.
+	var followID string
+	require.NoError(t, store.Conn(ctx).QueryRow(ctx,
+		`INSERT INTO emails (user_id, tracking_id) VALUES ($1, gen_random_uuid()) RETURNING id`, user).Scan(&followID))
+	at := time.Date(2026, 5, 18, 9, 0, 0, 0, time.UTC)
+	_, err = repo.SetFollowUp(ctx, other, a.ID, followID, at)
+	assert.ErrorIs(t, err, ErrNotFound)
+	f, err := repo.SetFollowUp(ctx, user, a.ID, followID, at)
+	require.NoError(t, err)
+	require.NotNil(t, f.FollowUpEmailID)
+	assert.Equal(t, followID, *f.FollowUpEmailID)
+	assert.True(t, at.Equal(*f.FollowUpSentAt))
+	_, err = repo.SetFollowUp(ctx, user, a.ID, followID, at)
+	assert.ErrorIs(t, err, ErrConflict, "one follow-up per application")
+	again, err := repo.Upsert(ctx, &db.Application{UserID: user, JobID: job, Status: db.AppSent, JobTitle: "Portail", Company: "Acme", Via: db.ViaSelf})
+	require.NoError(t, err)
+	assert.Nil(t, again.FollowUpEmailID)
+	assert.Nil(t, again.FollowUpSentAt)
 
 	_, err = store.Conn(ctx).Exec(ctx, `INSERT INTO applications (user_id, job_id, via) VALUES (gen_random_uuid(), gen_random_uuid(), 'pigeon')`)
 	assert.Error(t, err, "unknown channel")

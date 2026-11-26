@@ -81,6 +81,11 @@ type DraftInput struct {
 	Tone             string
 	// Goal is what the student looks for (Recruiter Radar); ai-api writes the email around it.
 	Goal string
+	// Kind is "follow_up" for a follow-up of an application (empty: a first email). Previous is the first email
+	// (subject and body) and DaysSince how many days ago it left.
+	Kind      string
+	Previous  string
+	DaysSince int
 }
 
 // Drafter calls 9itchi-ai-api. bearer is a short-lived token of the user.
