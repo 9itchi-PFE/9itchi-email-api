@@ -25,12 +25,12 @@ func NewMatchRepository(store *Store) MatchRepository {
 	return &matchRepository{store: store}
 }
 
-const matchColumns = `id, user_id, job_id, resume_id, language, input_hash, score, level, strengths, gaps, advice, created_at`
+const matchColumns = `id, user_id, job_id, resume_id, language, input_hash, score, level, strengths, gaps, advice, keywords, keyword_coverage, created_at`
 
 func scanMatch(r rowScanner) (*db.JobMatch, error) {
 	var m db.JobMatch
 	if err := r.Scan(&m.ID, &m.UserID, &m.JobID, &m.ResumeID, &m.Language, &m.InputHash, &m.Score, &m.Level,
-		&m.Strengths, &m.Gaps, &m.Advice, &m.CreatedAt); err != nil {
+		&m.Strengths, &m.Gaps, &m.Advice, &m.Keywords, &m.KeywordCoverage, &m.CreatedAt); err != nil {
 		return nil, MapError(err)
 	}
 	return &m, nil
@@ -54,13 +54,20 @@ func (r *matchRepository) Save(ctx context.Context, m *db.JobMatch) (*db.JobMatc
 	if gaps == nil {
 		gaps = []string{}
 	}
+	keywords := db.MatchKeywords{Matched: m.Keywords.Matched, Missing: m.Keywords.Missing}
+	if keywords.Matched == nil {
+		keywords.Matched = []string{}
+	}
+	if keywords.Missing == nil {
+		keywords.Missing = []string{}
+	}
 	// DO UPDATE with no change, so the row that was there first comes back.
 	return scanMatch(r.store.Conn(ctx).QueryRow(ctx, `
-		INSERT INTO job_matches (user_id, job_id, resume_id, language, input_hash, score, level, strengths, gaps, advice)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO job_matches (user_id, job_id, resume_id, language, input_hash, score, level, strengths, gaps, advice, keywords, keyword_coverage)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (user_id, job_id, resume_id, language, input_hash) DO UPDATE SET score = job_matches.score
 		RETURNING `+matchColumns,
-		m.UserID, m.JobID, m.ResumeID, m.Language, m.InputHash, m.Score, m.Level, strengths, gaps, m.Advice))
+		m.UserID, m.JobID, m.ResumeID, m.Language, m.InputHash, m.Score, m.Level, strengths, gaps, m.Advice, keywords, m.KeywordCoverage))
 }
 
 func (r *matchRepository) CountSince(ctx context.Context, userID string, since time.Time) (int, error) {

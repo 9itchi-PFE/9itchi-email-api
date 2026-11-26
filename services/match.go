@@ -148,6 +148,8 @@ func (s *matchService) Match(ctx context.Context, userID string, req api.MatchRe
 	m, err = s.Repo.Save(ctx, &db.JobMatch{
 		UserID: userID, JobID: req.JobID, ResumeID: req.ResumeID, Language: k.language, InputHash: k.hash,
 		Score: res.Score, Level: res.Level, Strengths: res.Strengths, Gaps: res.Gaps, Advice: res.Advice,
+		Keywords:        db.MatchKeywords{Matched: res.KeywordsMatched, Missing: res.KeywordsMissing},
+		KeywordCoverage: res.KeywordCoverage,
 	})
 	if err != nil {
 		return nil, repoError(err, "match not found")
@@ -167,8 +169,16 @@ func (s *matchService) respond(ctx context.Context, userID string, m *db.JobMatc
 	if gaps == nil {
 		gaps = []string{}
 	}
+	matched, missing := m.Keywords.Matched, m.Keywords.Missing
+	if matched == nil {
+		matched = []string{}
+	}
+	if missing == nil {
+		missing = []string{}
+	}
 	return &api.MatchResponse{
 		Score: m.Score, Level: m.Level, Strengths: strengths, Gaps: gaps, Advice: m.Advice, CreatedAt: m.CreatedAt,
+		Keywords: api.MatchKeywords{Matched: matched, Missing: missing}, KeywordCoverage: m.KeywordCoverage,
 		Limit: limit, Used: used,
 	}, nil
 }

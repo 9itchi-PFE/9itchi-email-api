@@ -60,9 +60,10 @@ func (m *memMatches) CountSince(_ context.Context, userID string, since time.Tim
 }
 
 type fakeMatcher struct {
-	calls int
-	in    core.MatchInput
-	err   error
+	noKeywords bool
+	calls      int
+	in         core.MatchInput
+	err        error
 }
 
 func (f *fakeMatcher) Match(_ context.Context, in core.MatchInput) (*core.MatchResult, error) {
@@ -71,7 +72,11 @@ func (f *fakeMatcher) Match(_ context.Context, in core.MatchInput) (*core.MatchR
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &core.MatchResult{Score: 68, Level: "good", Strengths: []string{"React en stage"}, Gaps: nil, Advice: "Mets en avant React."}, nil
+	if f.noKeywords {
+		return &core.MatchResult{Score: 68, Level: "good", Strengths: []string{"a"}}, nil
+	}
+	return &core.MatchResult{Score: 68, Level: "good", Strengths: []string{"React en stage"}, Gaps: nil, Advice: "Mets en avant React.",
+		KeywordsMatched: []string{"React"}, KeywordsMissing: []string{"Docker"}, KeywordCoverage: 50}, nil
 }
 
 // summaries answers a CV text per call: a CV that changes gives a new reading.
@@ -115,6 +120,8 @@ func TestMatchIsAskedOnceAndCounted(t *testing.T) {
 	assert.Equal(t, 68, res.Score)
 	assert.Equal(t, "good", res.Level)
 	assert.Equal(t, []string{}, res.Gaps, "an empty list, never null")
+	assert.Equal(t, api.MatchKeywords{Matched: []string{"React"}, Missing: []string{"Docker"}}, res.Keywords)
+	assert.Equal(t, 50, res.KeywordCoverage)
 	require.NotNil(t, res.Limit)
 	assert.Equal(t, 2, *res.Limit)
 	assert.Equal(t, 1, res.Used)
@@ -129,6 +136,8 @@ func TestMatchIsAskedOnceAndCounted(t *testing.T) {
 	found, apiErr := h.svc.Find(context.Background(), uid, req)
 	require.Nil(t, apiErr)
 	assert.Equal(t, 68, found.Score)
+	assert.Equal(t, []string{"Docker"}, found.Keywords.Missing, "GET returns the stored keywords")
+	assert.Equal(t, 50, found.KeywordCoverage)
 
 	h.resumes.text = "Ines, ENIS, React, Docker"
 	_, apiErr = h.svc.Match(context.Background(), uid, req)
@@ -187,4 +196,13 @@ func TestMatchFollowsThePlan(t *testing.T) {
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusInternalServerError, apiErr.Code)
 	assert.Zero(t, h.ai.calls)
+}
+
+func TestMatchRespondsEmptyKeywordsForOldRows(t *testing.T) {
+	h := newMatchHarness(nil)
+	h.ai.noKeywords = true
+	res, apiErr := h.svc.Match(context.Background(), uid, api.MatchRequest{JobID: jobID, ResumeID: resumID})
+	require.Nil(t, apiErr)
+	assert.Equal(t, api.MatchKeywords{Matched: []string{}, Missing: []string{}}, res.Keywords, "empty lists, never null")
+	assert.Zero(t, res.KeywordCoverage)
 }
