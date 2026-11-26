@@ -66,7 +66,12 @@ func NewRecruiterService(d RecruiterDeps) RecruiterService {
 
 // tunisDay is the start of the current day in Tunis and the start of the next one.
 func (s *recruiterService) tunisDay() (time.Time, time.Time) {
-	now := s.Now().In(tunis)
+	return tunisDayOf(s.Now())
+}
+
+// tunisDayOf is the start of the day of t in Tunis and the start of the next one.
+func tunisDayOf(t time.Time) (time.Time, time.Time) {
+	now := t.In(tunis)
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, tunis)
 	return start, start.AddDate(0, 0, 1)
 }

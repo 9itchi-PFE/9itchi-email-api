@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -18,9 +19,10 @@ import (
 )
 
 type memMatches struct {
-	mu   sync.Mutex
-	rows []db.JobMatch
-	err  error
+	mu      sync.Mutex
+	rows    []db.JobMatch
+	err     error
+	saveErr error
 }
 
 func (m *memMatches) Find(_ context.Context, userID, jobID, resumeID, language, hash string) (*db.JobMatch, error) {
@@ -41,18 +43,40 @@ func (m *memMatches) Find(_ context.Context, userID, jobID, resumeID, language, 
 func (m *memMatches) Save(_ context.Context, r *db.JobMatch) (*db.JobMatch, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return nil, m.saveErr
+	}
 	c := *r
+	c.ID = fmt.Sprintf("m%d", len(m.rows)+1)
+	if c.Origin == "" {
+		c.Origin = db.MatchOriginAnalysis
+	}
 	c.CreatedAt = time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	m.rows = append(m.rows, c)
 	return &c, nil
 }
 
-func (m *memMatches) CountSince(_ context.Context, userID string, since time.Time) (int, error) {
+func (m *memMatches) Upgrade(_ context.Context, r *db.JobMatch) (*db.JobMatch, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.rows {
+		if m.rows[i].ID == r.ID && m.rows[i].UserID == r.UserID && m.rows[i].Origin == db.MatchOriginScore {
+			row := &m.rows[i]
+			row.Score, row.Level, row.Strengths, row.Gaps, row.Advice = r.Score, r.Level, r.Strengths, r.Gaps, r.Advice
+			row.Keywords, row.KeywordCoverage, row.Origin = r.Keywords, r.KeywordCoverage, db.MatchOriginAnalysis
+			c := *row
+			return &c, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
+func (m *memMatches) CountSince(_ context.Context, userID, origin string, since time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, r := range m.rows {
-		if r.UserID == userID && !r.CreatedAt.Before(since) {
+		if r.UserID == userID && r.Origin == origin && !r.CreatedAt.Before(since) {
 			n++
 		}
 	}
@@ -205,4 +229,76 @@ func TestMatchRespondsEmptyKeywordsForOldRows(t *testing.T) {
 	require.Nil(t, apiErr)
 	assert.Equal(t, api.MatchKeywords{Matched: []string{}, Missing: []string{}}, res.Keywords, "empty lists, never null")
 	assert.Zero(t, res.KeywordCoverage)
+}
+
+// seedScore keeps a quick score of the test offer and CV, as POST /applications/scores would.
+func (h *matchHarness) seedScore(t *testing.T) {
+	t.Helper()
+	job := &core.JobInfo{Title: "Stage React", Company: "Acme", Description: "desc"}
+	_, err := h.repo.Save(context.Background(), &db.JobMatch{
+		UserID: uid, JobID: jobID, ResumeID: resumID, Language: "fr", InputHash: matchHash(job, h.resumes.text),
+		Score: 61, Level: "good", Strengths: []string{"React"}, Advice: "Conseil du score.", Origin: db.MatchOriginScore,
+	})
+	require.NoError(t, err)
+}
+
+func TestMatchHidesTheAdviceOfAScoreThePlanDoesNotCover(t *testing.T) {
+	req := api.MatchRequest{JobID: jobID, ResumeID: resumID}
+	for name, quotas := range map[string]map[string]int{
+		"no analyses": {core.QuotaAIMatches: 0},
+		"month used":  {core.QuotaAIMatches: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newMatchHarness(quotas)
+			if quotas[core.QuotaAIMatches] == 1 {
+				_, err := h.repo.Save(context.Background(), &db.JobMatch{UserID: uid, JobID: "other", ResumeID: resumID, Language: "fr"})
+				require.NoError(t, err)
+			}
+			h.seedScore(t)
+
+			res, apiErr := h.svc.Match(context.Background(), uid, req)
+			require.Nil(t, apiErr, "a score is shown, never a 402")
+			assert.Equal(t, 61, res.Score)
+			assert.Equal(t, db.MatchOriginScore, res.Origin)
+			assert.Empty(t, res.Advice, "the advice is hidden")
+			assert.Zero(t, h.ai.calls)
+
+			found, apiErr := h.svc.Find(context.Background(), uid, req)
+			require.Nil(t, apiErr)
+			assert.Empty(t, found.Advice)
+			assert.Equal(t, res.Used, found.Used, "not counted")
+		})
+	}
+}
+
+func TestMatchUpgradesAScoreWhenThePlanAllows(t *testing.T) {
+	h := newMatchHarness(map[string]int{core.QuotaAIMatches: 2})
+	h.seedScore(t)
+	req := api.MatchRequest{JobID: jobID, ResumeID: resumID}
+
+	found, apiErr := h.svc.Find(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	assert.Empty(t, found.Advice, "GET never asks: the score keeps its advice hidden")
+	assert.Zero(t, found.Used)
+
+	res, apiErr := h.svc.Match(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, h.ai.calls, "the full analysis is asked")
+	assert.Equal(t, db.MatchOriginAnalysis, res.Origin)
+	assert.Equal(t, 68, res.Score)
+	assert.Equal(t, "Mets en avant React.", res.Advice)
+	assert.Equal(t, 1, res.Used, "and counted")
+	assert.Len(t, h.repo.rows, 1, "the score row becomes the analysis")
+
+	_, apiErr = h.svc.Match(context.Background(), uid, req)
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, h.ai.calls, "not asked again")
+
+	h = newMatchHarness(map[string]int{core.QuotaAIMatches: 2})
+	h.seedScore(t)
+	h.ai.err = errors.New("ai down")
+	_, apiErr = h.svc.Match(context.Background(), uid, req)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadGateway, apiErr.Code)
+	assert.Equal(t, db.MatchOriginScore, h.repo.rows[0].Origin, "the score stays a score")
 }

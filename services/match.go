@@ -73,12 +73,25 @@ func (s *matchService) key(ctx context.Context, userID string, req api.MatchRequ
 	if language == "" {
 		language = "fr"
 	}
+	return &matchKey{job: job, resume: resume, language: language, hash: matchHash(job, resume)}, nil
+}
+
+// matchHash is the digest of what the AI reads for an offer and a CV (job_matches.input_hash).
+func matchHash(job *core.JobInfo, resume string) string {
 	h := sha256.New()
 	for _, part := range []string{job.Title, job.Company, job.Description, strings.Join(job.Skills, "\x1f"), resume} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
 	}
-	return &matchKey{job: job, resume: resume, language: language, hash: hex.EncodeToString(h.Sum(nil))}, nil
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// matchInput is what the AI reads for an offer and a CV.
+func matchInput(job *core.JobInfo, resume, language string) core.MatchInput {
+	return core.MatchInput{
+		JobTitle: job.Title, Company: job.Company, JobDescription: job.Description, JobSkills: job.Skills,
+		Candidate: resume, Language: language,
+	}
 }
 
 // usage is the plan's monthly limit of analyses and how many were made this month; limit nil means no limit.
@@ -92,7 +105,7 @@ func (s *matchService) usage(ctx context.Context, userID string) (limit *int, us
 		return nil, 0, nil
 	}
 	now := s.Now().UTC()
-	n, err := s.Repo.CountSince(ctx, userID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
+	n, err := s.Repo.CountSince(ctx, userID, db.MatchOriginAnalysis, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		return nil, 0, repoError(err, "match not found")
 	}
@@ -112,38 +125,55 @@ func (s *matchService) Find(ctx context.Context, userID string, req api.MatchReq
 }
 
 // Match reuses the reading of the same offer and CV when there is one: it is not asked again nor counted. Otherwise
-// the plan must allow one more this month (402), and the AI is asked.
+// the plan must allow one more this month (402), and the AI is asked. A quick score of the same offer and CV is
+// read again as a full analysis (asked and counted) when the plan allows one more, else given back without advice.
 func (s *matchService) Match(ctx context.Context, userID string, req api.MatchRequest) (*api.MatchResponse, *models.ApiError) {
 	k, apiErr := s.key(ctx, userID, req)
 	if apiErr != nil {
 		return nil, apiErr
 	}
 	m, err := s.Repo.Find(ctx, userID, req.JobID, req.ResumeID, k.language, k.hash)
-	if err == nil {
+	if err == nil && m.Origin != db.MatchOriginScore {
 		return s.respond(ctx, userID, m)
 	}
-	if !errors.Is(err, repositories.ErrNotFound) {
+	if err != nil && !errors.Is(err, repositories.ErrNotFound) {
 		return nil, repoError(err, "match not found")
 	}
-	if strings.TrimSpace(k.resume) == "" {
+	score := m
+	if score == nil && strings.TrimSpace(k.resume) == "" {
 		return nil, apiError(http.StatusUnprocessableEntity, "the CV is empty")
 	}
 	limit, used, apiErr := s.usage(ctx, userID)
 	if apiErr != nil {
 		return nil, apiErr
 	}
+	allowed := limit == nil || (*limit > 0 && used < *limit)
 	switch {
+	case score != nil && !allowed:
+		return s.respond(ctx, userID, score)
 	case limit != nil && *limit == 0:
 		return nil, apiError(http.StatusPaymentRequired, "the AI analysis of offers is part of the subscription")
 	case limit != nil && used >= *limit:
 		return nil, apiError(http.StatusPaymentRequired, "monthly limit of AI analyses of your plan reached")
 	}
-	res, err := s.Matcher.Match(ctx, core.MatchInput{
-		JobTitle: k.job.Title, Company: k.job.Company, JobDescription: k.job.Description, JobSkills: k.job.Skills,
-		Candidate: k.resume, Language: k.language,
-	})
+	res, err := s.Matcher.Match(ctx, matchInput(k.job, k.resume, k.language))
 	if err != nil {
 		return nil, peerError(err, "job not found")
+	}
+	if score != nil {
+		m, err = s.Repo.Upgrade(ctx, &db.JobMatch{
+			ID: score.ID, UserID: userID, Score: res.Score, Level: res.Level, Strengths: res.Strengths, Gaps: res.Gaps,
+			Advice: res.Advice, Keywords: db.MatchKeywords{Matched: res.KeywordsMatched, Missing: res.KeywordsMissing},
+			KeywordCoverage: res.KeywordCoverage,
+		})
+		if errors.Is(err, repositories.ErrNotFound) {
+			// Upgraded by a request at the same time: that analysis is the one kept.
+			m, err = s.Repo.Find(ctx, userID, req.JobID, req.ResumeID, k.language, k.hash)
+		}
+		if err != nil {
+			return nil, repoError(err, "match not found")
+		}
+		return s.respond(ctx, userID, m)
 	}
 	m, err = s.Repo.Save(ctx, &db.JobMatch{
 		UserID: userID, JobID: req.JobID, ResumeID: req.ResumeID, Language: k.language, InputHash: k.hash,
@@ -176,8 +206,16 @@ func (s *matchService) respond(ctx context.Context, userID string, m *db.JobMatc
 	if missing == nil {
 		missing = []string{}
 	}
+	origin, advice := m.Origin, m.Advice
+	if origin == "" {
+		origin = db.MatchOriginAnalysis
+	}
+	if origin == db.MatchOriginScore {
+		// A score is not an analysis the plan paid for: its advice stays hidden until it is read as one.
+		advice = ""
+	}
 	return &api.MatchResponse{
-		Score: m.Score, Level: m.Level, Strengths: strengths, Gaps: gaps, Advice: m.Advice, CreatedAt: m.CreatedAt,
+		Score: m.Score, Level: m.Level, Strengths: strengths, Gaps: gaps, Advice: advice, Origin: origin, CreatedAt: m.CreatedAt,
 		Keywords: api.MatchKeywords{Matched: matched, Missing: missing}, KeywordCoverage: m.KeywordCoverage,
 		Limit: limit, Used: used,
 	}, nil
