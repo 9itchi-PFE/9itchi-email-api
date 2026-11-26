@@ -79,6 +79,8 @@ type DraftInput struct {
 	CandidateSummary string
 	Language         string
 	Tone             string
+	// Goal is what the student looks for (Recruiter Radar); ai-api writes the email around it.
+	Goal string
 }
 
 // Drafter calls 9itchi-ai-api. bearer is a short-lived token of the user.
