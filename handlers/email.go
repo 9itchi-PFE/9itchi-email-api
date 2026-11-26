@@ -121,3 +121,37 @@ func UserBuiltSends(svc services.EmailService) gin.HandlerFunc {
 		c.JSON(http.StatusOK, result)
 	}
 }
+
+// DraftFromLink: POST /emails/draft-from-link (user) AI draft for an offer given by its link.
+func DraftFromLink(svc services.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.DraftFromLinkRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.DraftFromLink(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// UpdateEmail: PATCH /emails/:id (user) edit a scheduled email.
+func UpdateEmail(svc services.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.UpdateEmailRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.UpdateEmail(c.Request.Context(), c.GetString("user_id"), c.Param("id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}

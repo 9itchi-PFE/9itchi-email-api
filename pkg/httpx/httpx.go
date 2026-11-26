@@ -55,6 +55,10 @@ func Do(ctx context.Context, hc *http.Client, r Request, out any) error {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return core.ErrPeerNotFound
 	}
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return fmt.Errorf("%w: status %d", core.ErrPeerUnprocessable, resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("%w: status %d", core.ErrPeerUnavailable, resp.StatusCode)

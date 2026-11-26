@@ -13,6 +13,9 @@ var (
 	ErrPeerNotFound = errors.New("peer resource not found")
 	// ErrGmailAuth means Google refused the stored credentials (revoked or expired): the user must reconnect.
 	ErrGmailAuth = errors.New("gmail authorization failed")
+	// ErrPeerUnprocessable means a peer service answered 422: it understood the request and cannot do it (an offer
+	// link it cannot read).
+	ErrPeerUnprocessable = errors.New("peer could not process the request")
 )
 
 // Keys of the payments plan quotas read here.
@@ -28,6 +31,9 @@ const (
 	// QuotaAIDrafts is the monthly limit of letters written by the AI (absent: no limit; 0: none). A letter
 	// already written for the same offer and CV, given back again, is not counted.
 	QuotaAIDrafts = "ai_drafts_per_month"
+	// QuotaRecruiterSearches is the daily limit (Tunis day) of recruiter searches (absent or negative: no limit;
+	// 0: none). The same search again the same day is not counted.
+	QuotaRecruiterSearches = "recruiter_searches_per_day"
 )
 
 // GoogleToken is an OAuth2 token pair stored (encrypted) per user.
@@ -154,4 +160,56 @@ type MatchResult struct {
 // Matcher calls 9itchi-ai-api (internal route).
 type Matcher interface {
 	Match(ctx context.Context, in MatchInput) (*MatchResult, error)
+}
+
+// RecruiterQuery is what a student looks for: recruiters of a company or a domain, or of the field of their skills
+// and keywords, near a location. Limit caps the number of results.
+type RecruiterQuery struct {
+	Skills   []string `json:"skills"`
+	Keywords []string `json:"keywords"`
+	Company  string   `json:"company"`
+	Domain   string   `json:"domain"`
+	Location string   `json:"location"`
+	Limit    int      `json:"limit"`
+}
+
+// Recruiter is one person who hires: name, title, company and how to reach them. Confidence (0 to 100) is how sure
+// the provider is of the address.
+type Recruiter struct {
+	Name        string
+	Title       string
+	Company     string
+	Domain      string
+	Email       string
+	LinkedInURL string
+	Confidence  int
+}
+
+// RecruiterFinder is one provider of recruiter contacts, chosen by name in pkg/recruiters.
+// Contract: Find returns at most q.Limit people with an HR, talent-acquisition or hiring-manager title, Confidence
+// between 0 and 100, Email possibly empty; the same query gives the same answer; a failure wraps ErrPeerUnavailable.
+type RecruiterFinder interface {
+	Name() string
+	Find(ctx context.Context, q RecruiterQuery) ([]Recruiter, error)
+}
+
+// SkillSource calls 9itchi-resume-api for the skills listed on a CV of the user.
+type SkillSource interface {
+	Skills(ctx context.Context, bearer, resumeID string) ([]string, error)
+}
+
+// OfferText is an offer read from a link (or from its pasted text) by 9itchi-job-api. Source is "linkedin" or the
+// host of the link.
+type OfferText struct {
+	Source      string
+	Title       string
+	Company     string
+	Description string
+	ApplyEmail  string
+}
+
+// OfferReader calls 9itchi-job-api to read one offer link. text, when given, is the offer as the student pasted
+// it and nothing is fetched. An offer it cannot read wraps ErrPeerUnprocessable.
+type OfferReader interface {
+	ReadOffer(ctx context.Context, rawURL, text string) (*OfferText, error)
 }

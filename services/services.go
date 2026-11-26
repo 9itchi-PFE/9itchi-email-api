@@ -6,6 +6,7 @@ import (
 	"9itchi-email-api/pkg/google"
 	"9itchi-email-api/pkg/job"
 	"9itchi-email-api/pkg/payments"
+	"9itchi-email-api/pkg/recruiters"
 	"9itchi-email-api/pkg/resume"
 	"9itchi-email-api/pkg/schedule"
 	"9itchi-email-api/pkg/tracker"
@@ -21,6 +22,7 @@ type Services struct {
 	Email       EmailService
 	Application ApplicationService
 	Match       MatchService
+	Recruiter   RecruiterService
 	Clients     *Clients
 }
 
@@ -35,7 +37,15 @@ type Clients struct {
 	Google   *google.Client
 }
 
-func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Services {
+// InitServices builds the services. It fails on an unknown recruiter provider.
+func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Services, error) {
+	finder, err := recruiters.New(config.RecruiterProvider, recruiters.Config{APIKey: config.RecruiterAPIKey, BaseURL: config.RecruiterBaseURL})
+	if err != nil {
+		return nil, err
+	}
+	if finder.Name() == "fake" && config.Environment == "production" {
+		utils.Logger.Logger.Warnw("recruiter search uses the fake provider: its people are invented (.example domains)")
+	}
 	clients := &Clients{
 		Ai:       ai.New(config.AiAPIURL, config.InternalAPIKey),
 		Resume:   resume.New(config.ResumeAPIURL, config.InternalAPIKey),
@@ -51,7 +61,7 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 	emails := NewEmailService(EmailDeps{
 		Repo: repos.Email, Gmail: gmail, Mailer: clients.Google, Drafter: clients.Ai, Jobs: clients.Job,
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
-		Events: events, Config: config, Drafts: repos.Draft,
+		Events: events, Config: config, Drafts: repos.Draft, Offers: clients.Job, Recruiters: repos.Recruiter,
 	})
 	return &Services{
 		Erase:       NewEraseService(repos.Erase),
@@ -61,6 +71,9 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) *Ser
 		Match: NewMatchService(MatchDeps{
 			Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
 		}),
+		Recruiter: NewRecruiterService(RecruiterDeps{
+			Repo: repos.Recruiter, Finder: finder, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
+		}),
 		Clients: clients,
-	}
+	}, nil
 }

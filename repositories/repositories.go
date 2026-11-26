@@ -15,6 +15,7 @@ type Repositories struct {
 	Erase       EraseRepository
 	Match       MatchRepository
 	Draft       DraftRepository
+	Recruiter   RecruiterRepository
 }
 
 // InitRepositories connects to PostgreSQL, applies migrations and builds the repositories.
@@ -34,6 +35,7 @@ func InitRepositories(ctx context.Context, config utils.AppConfig) (*Repositorie
 		Erase:       NewEraseRepository(store),
 		Match:       NewMatchRepository(store),
 		Draft:       NewDraftRepository(store),
+		Recruiter:   NewRecruiterRepository(store),
 	}, nil
 }
 

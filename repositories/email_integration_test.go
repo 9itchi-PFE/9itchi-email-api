@@ -118,3 +118,35 @@ func TestEmailRepositoryLastBuiltSend(t *testing.T) {
 	require.NotNil(t, last)
 	assert.WithinDuration(t, time.Now(), *last, time.Minute)
 }
+
+// Only an email of the user that is still scheduled is edited.
+func TestEmailRepositoryUpdateScheduled(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewEmailRepository(store)
+	const user, other = "00000000-0000-0000-0000-0000000000b1", "00000000-0000-0000-0000-0000000000b2"
+	at := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	resume, task := "00000000-0000-0000-0000-0000000000b3", "task-2"
+	e, err := repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailScheduled, ScheduledAt: &at, ResumeID: &resume})
+	require.NoError(t, err)
+
+	later := at.Add(24 * time.Hour)
+	edit := db.EmailEdit{Recipient: "rh@acme.tn", Subject: "s2", Body: "b2", ScheduledAt: &later, ScheduleTaskID: &task}
+	_, err = repo.UpdateScheduled(ctx, other, e.ID, edit)
+	assert.ErrorIs(t, err, ErrNotFound, "another student's email")
+
+	out, err := repo.UpdateScheduled(ctx, user, e.ID, edit)
+	require.NoError(t, err)
+	assert.Equal(t, "rh@acme.tn", out.Recipient)
+	assert.Equal(t, "s2", out.Subject)
+	assert.Equal(t, "b2", out.Body)
+	assert.Nil(t, out.ResumeID, "sent without a CV")
+	assert.True(t, later.Equal(*out.ScheduledAt))
+	require.NotNil(t, out.ScheduleTaskID)
+	assert.Equal(t, task, *out.ScheduleTaskID)
+
+	_, err = repo.Cancel(ctx, user, e.ID)
+	require.NoError(t, err)
+	_, err = repo.UpdateScheduled(ctx, user, e.ID, edit)
+	assert.ErrorIs(t, err, ErrNotFound, "no longer scheduled")
+}

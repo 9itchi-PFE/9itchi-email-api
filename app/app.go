@@ -45,7 +45,10 @@ func (app *App) setup() {
 		log.Fatalf("repositories: %v", err)
 	}
 
-	servicesWrapper := services.InitServices(config, repos)
+	servicesWrapper, err := services.InitServices(config, repos)
+	if err != nil {
+		log.Fatalf("services: %v", err)
+	}
 
 	app.Config = config
 	app.Repos = repos

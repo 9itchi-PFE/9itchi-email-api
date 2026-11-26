@@ -49,23 +49,31 @@ type EmailService interface {
 	DispatchScheduled(ctx context.Context, id string) (*db.Email, *models.ApiError)
 	// GET /admin/users/:id/sent-with-cv: how many applications left with the CV built in 9itchi, and the last time
 	UserBuiltSends(ctx context.Context, id string) (*api.UserBuiltSendsResponse, *models.ApiError)
+	// POST /emails/draft-from-link: AI draft for an offer given by its link (9itchi or elsewhere)
+	DraftFromLink(ctx context.Context, userID string, req api.DraftFromLinkRequest) (*api.DraftFromLinkResponse, *models.ApiError)
+	// PATCH /emails/:id: edit a scheduled email (recipient, text, CV, time)
+	UpdateEmail(ctx context.Context, userID, id string, req api.UpdateEmailRequest) (*db.Email, *models.ApiError)
+	// POST /recruiters/:id/draft: AI draft of a spontaneous application to a recruiter the student found
+	DraftForRecruiter(ctx context.Context, userID, id string, req api.RecruiterDraftRequest) (*api.DraftEmailResponse, *models.ApiError)
 }
 
 // EmailDeps are the collaborators of the email service (all mockable).
 type EmailDeps struct {
-	Repo      repositories.EmailRepository
-	Gmail     GmailService
-	Mailer    core.Mailer
-	Drafter   core.Drafter
-	Jobs      core.JobSource
-	Resumes   core.ResumeSource
-	Tracker   core.Tracker
-	Scheduler core.Scheduler
-	Quotas    core.QuotaSource
-	Drafts    repositories.DraftRepository
-	Events    core.Publisher
-	Config    utils.AppConfig
-	Now       func() time.Time
+	Repo       repositories.EmailRepository
+	Gmail      GmailService
+	Mailer     core.Mailer
+	Drafter    core.Drafter
+	Jobs       core.JobSource
+	Resumes    core.ResumeSource
+	Tracker    core.Tracker
+	Scheduler  core.Scheduler
+	Quotas     core.QuotaSource
+	Drafts     repositories.DraftRepository
+	Offers     core.OfferReader
+	Recruiters repositories.RecruiterRepository
+	Events     core.Publisher
+	Config     utils.AppConfig
+	Now        func() time.Time
 }
 
 type emailService struct {
@@ -111,14 +119,26 @@ func (s *emailService) bearer(userID string) (string, error) {
 }
 
 func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.DraftEmailRequest) (*api.DraftEmailResponse, *models.ApiError) {
+	out, _, apiErr := s.draftForJob(ctx, userID, req)
+	return out, apiErr
+}
+
+// draftForJob is DraftEmail, also giving the offer it read.
+func (s *emailService) draftForJob(ctx context.Context, userID string, req api.DraftEmailRequest) (*api.DraftEmailResponse, *core.JobInfo, *models.ApiError) {
 	token, err := s.bearer(userID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal error")
+		return nil, nil, apiError(http.StatusInternalServerError, "internal error")
 	}
 	job, err := s.Jobs.Job(ctx, token, req.JobID)
 	if err != nil {
-		return nil, peerError(err, "job not found")
+		return nil, nil, peerError(err, "job not found")
 	}
+	out, apiErr := s.draftJob(ctx, userID, token, job, req)
+	return out, job, apiErr
+}
+
+func (s *emailService) draftJob(ctx context.Context, userID, token string, job *core.JobInfo, req api.DraftEmailRequest) (*api.DraftEmailResponse, *models.ApiError) {
+	var err error
 	summary := ""
 	if req.ResumeID != "" {
 		if summary, err = s.Resumes.Summary(ctx, token, req.ResumeID); err != nil {
@@ -160,7 +180,7 @@ func (s *emailService) DraftEmail(ctx context.Context, userID string, req api.Dr
 		return nil, peerError(err, "job not found")
 	}
 	if _, err := s.Drafts.Save(ctx, &db.AIDraft{
-		UserID: userID, JobID: req.JobID, Language: language, Tone: tone, InputHash: hash, Subject: subject, Body: body,
+		UserID: userID, JobID: &req.JobID, Language: language, Tone: tone, InputHash: hash, Subject: subject, Body: body,
 	}); err != nil {
 		return nil, repoError(err, "draft not found")
 	}
@@ -274,13 +294,8 @@ func (s *emailService) create(ctx context.Context, userID string, req api.SendEm
 		return nil, apiErr
 	}
 	if original && req.ResumeID != "" {
-		// Said now, while the student can still do something about it, and not when the email fails to leave.
-		f, err := s.Resumes.Original(ctx, req.ResumeID)
-		if err != nil {
-			return nil, peerError(err, "resume not found")
-		}
-		if f == nil {
-			return nil, apiError(http.StatusUnprocessableEntity, "this CV has no imported file to send")
+		if apiErr := s.checkAttachable(ctx, req.ResumeID); apiErr != nil {
+			return nil, apiErr
 		}
 	}
 	e, err := s.Repo.Create(ctx, &db.Email{
@@ -291,6 +306,19 @@ func (s *emailService) create(ctx context.Context, userID string, req api.SendEm
 		return nil, repoError(err, "email not found")
 	}
 	return e, nil
+}
+
+// checkAttachable makes sure the CV has an imported file, for an email that must carry it. Said now, while the
+// student can still do something about it, and not when the email fails to leave.
+func (s *emailService) checkAttachable(ctx context.Context, resumeID string) *models.ApiError {
+	f, err := s.Resumes.Original(ctx, resumeID)
+	if err != nil {
+		return peerError(err, "resume not found")
+	}
+	if f == nil {
+		return apiError(http.StatusUnprocessableEntity, "this CV has no imported file to send")
+	}
+	return nil
 }
 
 func (s *emailService) SendEmail(ctx context.Context, userID string, req api.SendEmailRequest) (*db.Email, *models.ApiError) {
@@ -389,6 +417,10 @@ func (s *emailService) DispatchScheduled(ctx context.Context, id string) (*db.Em
 		return nil, repoError(err, "email not found")
 	}
 	if e.Status != db.EmailScheduled {
+		return e, nil
+	}
+	if e.ScheduledAt != nil && e.ScheduledAt.After(s.Now().Add(minScheduleDelay)) {
+		// The task of a time the student since moved: the email waits for its new task.
 		return e, nil
 	}
 	out, apiErr := s.deliver(ctx, id, true)
@@ -503,4 +535,106 @@ func (s *emailService) publish(ctx context.Context, event string, e *db.Email, s
 	if err := s.Events.Publish(ctx, event, payload); err != nil {
 		utils.Logger.Logger.Warnw("publish event", "event", event, "email_id", e.ID, "error", err)
 	}
+}
+
+// UpdateEmail edits a scheduled email. The recipient of an offer that takes applications at its own address stays
+// that address. A new time gets its schedule task first; the email changes only once it has one, and the task of
+// the old time is then dropped (were it to run anyway, the dispatch finds the email not due and does nothing).
+func (s *emailService) UpdateEmail(ctx context.Context, userID, id string, req api.UpdateEmailRequest) (*db.Email, *models.ApiError) {
+	e, err := s.Repo.Get(ctx, userID, id)
+	if err != nil {
+		return nil, repoError(err, "email not found")
+	}
+	if e.Status != db.EmailScheduled {
+		return nil, apiError(http.StatusConflict, "only a scheduled email can be edited")
+	}
+	edit := db.EmailEdit{
+		Recipient: e.Recipient, Subject: e.Subject, Body: e.Body, ResumeID: e.ResumeID,
+		ScheduledAt: e.ScheduledAt, ScheduleTaskID: e.ScheduleTaskID,
+	}
+
+	if req.To != nil && !strings.EqualFold(strings.TrimSpace(*req.To), e.Recipient) {
+		if e.JobID != nil {
+			job, err := s.Jobs.ApplyInfo(ctx, *e.JobID)
+			if err != nil && !errors.Is(err, core.ErrPeerNotFound) {
+				return nil, peerError(err, "job not found")
+			}
+			if err == nil && job.ApplyEmail != "" {
+				return nil, apiError(http.StatusConflict, "this offer takes applications at its own address")
+			}
+		}
+		edit.Recipient = strings.TrimSpace(*req.To)
+	}
+	if req.Subject != nil {
+		if edit.Subject = strings.TrimSpace(*req.Subject); edit.Subject == "" {
+			return nil, apiError(http.StatusBadRequest, "subject cannot be empty")
+		}
+	}
+	if req.Body != nil {
+		if strings.TrimSpace(*req.Body) == "" {
+			return nil, apiError(http.StatusBadRequest, "body cannot be empty")
+		}
+		edit.Body = *req.Body
+	}
+
+	attach := req.AttachCV
+	if attach == nil && req.ResumeID != nil {
+		yes := true
+		attach = &yes
+	}
+	if attach != nil {
+		if !*attach {
+			edit.ResumeID = nil
+		} else {
+			resumeID := e.ResumeID
+			if req.ResumeID != nil {
+				resumeID = req.ResumeID
+			}
+			if resumeID == nil {
+				return nil, apiError(http.StatusBadRequest, "attach_cv needs a resume_id")
+			}
+			changed := e.ResumeID == nil || !strings.EqualFold(*e.ResumeID, *resumeID)
+			if e.CVOriginal && changed {
+				if apiErr := s.checkAttachable(ctx, *resumeID); apiErr != nil {
+					return nil, apiErr
+				}
+			}
+			edit.ResumeID = resumeID
+		}
+	}
+
+	var newTask *string
+	if req.ScheduledAt != nil && (e.ScheduledAt == nil || !req.ScheduledAt.Equal(*e.ScheduledAt)) {
+		at := req.ScheduledAt.UTC()
+		now := s.Now()
+		if at.Before(now.Add(minScheduleDelay)) || at.After(now.Add(maxScheduleAhead)) {
+			return nil, apiError(http.StatusBadRequest, "scheduled_at must be between one minute and one year from now")
+		}
+		taskID, err := s.Scheduler.ScheduleEmail(ctx, e.ID, at)
+		if err != nil {
+			return nil, peerError(err, "schedule not found")
+		}
+		newTask = &taskID
+		edit.ScheduledAt, edit.ScheduleTaskID = &at, newTask
+	}
+
+	out, err := s.Repo.UpdateScheduled(ctx, userID, id, edit)
+	if err != nil {
+		if newTask != nil {
+			if err := s.Scheduler.Cancel(ctx, *newTask); err != nil {
+				utils.Logger.Logger.Warnw("email: could not cancel schedule task", "error", err)
+			}
+		}
+		if errors.Is(err, repositories.ErrNotFound) {
+			return nil, apiError(http.StatusConflict, "only a scheduled email can be edited")
+		}
+		return nil, repoError(err, "email not found")
+	}
+	if newTask != nil && e.ScheduleTaskID != nil {
+		// The dispatch of the old time finds the email not due, so a failed cancel is only logged.
+		if err := s.Scheduler.Cancel(ctx, *e.ScheduleTaskID); err != nil {
+			utils.Logger.Logger.Warnw("email: could not cancel schedule task", "error", err)
+		}
+	}
+	return out, nil
 }

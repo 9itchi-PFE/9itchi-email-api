@@ -31,3 +31,13 @@ const (
 	EmailFailed    = "failed"
 	EmailCancelled = "cancelled"
 )
+
+// EmailEdit is the whole editable part of a scheduled email, written at once.
+type EmailEdit struct {
+	Recipient      string
+	Subject        string
+	Body           string
+	ResumeID       *string
+	ScheduledAt    *time.Time
+	ScheduleTaskID *string
+}

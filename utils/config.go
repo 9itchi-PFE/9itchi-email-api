@@ -35,6 +35,11 @@ type AppConfig struct {
 	ClientURL string
 	// TrackerPublicURL is the public base URL of the tracking pixel (opened by the recipient's mail client).
 	TrackerPublicURL string
+	// RecruiterProvider names the provider of recruiter contacts registered in pkg/recruiters (default "fake", which
+	// invents people at .example domains). Any other provider needs RecruiterAPIKey; never log it.
+	RecruiterProvider string
+	RecruiterAPIKey   string
+	RecruiterBaseURL  string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -61,6 +66,9 @@ func LoadConfig() AppConfig {
 		GoogleRedirectURL:      getStringWithDefault("GMAIL_REDIRECT_URL", "http://localhost:8085/gmail/callback"),
 		ClientURL:              getStringWithDefault("CLIENT_URL", "http://localhost:3000"),
 		TrackerPublicURL:       getStringWithDefault("TRACKER_PUBLIC_URL", "http://localhost:8086"),
+		RecruiterProvider:      getStringWithDefault("RECRUITER_PROVIDER", "fake"),
+		RecruiterAPIKey:        getStringWithDefault("RECRUITER_API_KEY", ""),
+		RecruiterBaseURL:       getStringWithDefault("RECRUITER_BASE_URL", ""),
 	}
 }
 
@@ -81,6 +89,11 @@ func (c AppConfig) Validate() error {
 	}
 	if c.InternalAPIKeyRequired && c.InternalAPIKey == "" {
 		bad = append(bad, "INTERNAL_API_KEY")
+	}
+	if c.RecruiterProvider == "" {
+		bad = append(bad, "RECRUITER_PROVIDER")
+	} else if c.RecruiterProvider != "fake" && c.RecruiterAPIKey == "" {
+		bad = append(bad, "RECRUITER_API_KEY (required by RECRUITER_PROVIDER)")
 	}
 	if len(bad) > 0 {
 		return fmt.Errorf("required environment variables are missing or invalid: %s", strings.Join(bad, ", "))

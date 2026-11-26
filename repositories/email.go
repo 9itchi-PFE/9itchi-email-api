@@ -30,6 +30,9 @@ type EmailRepository interface {
 	// LastBuiltSend returns how many of the user's emails left with the CV built in 9itchi (not the imported
 	// file) and when the last one did (nil when none; the last change of the row when the time it left is missing).
 	LastBuiltSend(ctx context.Context, userID string) (int, *time.Time, error)
+	// UpdateScheduled writes the editable part of a scheduled email of userID (ErrNotFound when it is not, or no
+	// longer, scheduled).
+	UpdateScheduled(ctx context.Context, userID, id string, edit db.EmailEdit) (*db.Email, error)
 }
 
 type emailRepository struct {
@@ -171,4 +174,13 @@ func (r *emailRepository) LastBuiltSend(ctx context.Context, userID string) (int
 	err := r.store.Conn(ctx).QueryRow(ctx,
 		`SELECT count(*), max(coalesce(sent_at, updated_at)) FROM emails WHERE user_id = $1 AND status = 'sent' AND NOT cv_original`, userID).Scan(&n, &last)
 	return n, last, MapError(err)
+}
+
+func (r *emailRepository) UpdateScheduled(ctx context.Context, userID, id string, edit db.EmailEdit) (*db.Email, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanEmail(r.store.Conn(ctx).QueryRow(ctx, `
+		UPDATE emails SET recipient = $3, subject = $4, body = $5, resume_id = $6, scheduled_at = $7, schedule_task_id = $8, updated_at = now()
+		WHERE id = $1 AND user_id = $2 AND status = 'scheduled'
+		RETURNING `+emailColumns, id, userID, edit.Recipient, edit.Subject, edit.Body, edit.ResumeID, edit.ScheduledAt, edit.ScheduleTaskID))
 }

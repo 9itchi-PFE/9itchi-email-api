@@ -35,10 +35,12 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.GET("/gmail/status", handlers.GmailStatus(services.Gmail))
 		userGroup.DELETE("/gmail/connection", handlers.RevokeGmail(services.Gmail))
 		userGroup.POST("/emails/draft", handlers.DraftEmail(services.Email))
+		userGroup.POST("/emails/draft-from-link", handlers.DraftFromLink(services.Email))
 		userGroup.POST("/emails", handlers.SendEmail(services.Email))
 		userGroup.POST("/emails/schedule", handlers.ScheduleEmail(services.Email))
 		userGroup.GET("/emails", handlers.ListEmails(services.Email))
 		userGroup.GET("/emails/:id", handlers.GetEmail(services.Email))
+		userGroup.PATCH("/emails/:id", handlers.UpdateEmail(services.Email))
 		userGroup.DELETE("/emails/:id", handlers.CancelEmail(services.Email))
 		userGroup.POST("/applications", handlers.Apply(services.Application))
 		userGroup.GET("/applications", handlers.ListApplications(services.Application))
@@ -47,6 +49,10 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.GET("/applications/match", handlers.FindMatch(services.Match))
 		userGroup.PATCH("/applications/:id", handlers.UpdateApplication(services.Application))
 		userGroup.POST("/applications/:id/send", handlers.SendApplicationNow(services.Application))
+		userGroup.POST("/recruiters/search", handlers.SearchRecruiters(services.Recruiter))
+		userGroup.GET("/recruiters", handlers.ListRecruiters(services.Recruiter))
+		userGroup.GET("/recruiters/allowance", handlers.RecruiterAllowance(services.Recruiter))
+		userGroup.POST("/recruiters/:id/draft", handlers.DraftForRecruiter(services.Email))
 	}
 
 	// admin endpoints
