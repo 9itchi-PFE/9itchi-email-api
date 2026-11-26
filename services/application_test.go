@@ -223,7 +223,7 @@ func TestScheduledApplication(t *testing.T) {
 	assert.Equal(t, 409, apiErr.Code, "nothing was sent yet")
 
 	// The dispatcher sends it: the list follows the email.
-	_, apiErr = h.harness.svc.DispatchScheduled(context.Background(), res.Email.ID)
+	_, apiErr = dispatchAt(h.harness.svc, tomorrow, res.Email.ID)
 	require.Nil(t, apiErr)
 	list, apiErr := h.svc.ListApplications(context.Background(), uid)
 	require.Nil(t, apiErr)
@@ -275,7 +275,7 @@ func TestScheduledApplicationWhoseEmailFailed(t *testing.T) {
 	res, apiErr := h.svc.Apply(context.Background(), uid, req)
 	require.Nil(t, apiErr)
 	h.mailer.err = core.ErrGmailAuth
-	_, _ = h.harness.svc.DispatchScheduled(context.Background(), res.Email.ID)
+	_, _ = dispatchAt(h.harness.svc, tomorrow, res.Email.ID)
 
 	list, apiErr := h.svc.ListApplications(context.Background(), uid)
 	require.Nil(t, apiErr)

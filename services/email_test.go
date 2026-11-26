@@ -164,6 +164,20 @@ func (m *memEmails) LastBuiltSend(_ context.Context, userID string) (int, *time.
 	return n, last, nil
 }
 
+// UpdateScheduled writes like the repository: only an email of the user that is still scheduled.
+func (m *memEmails) UpdateScheduled(_ context.Context, userID, id string, edit db.EmailEdit) (*db.Email, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.rows[id]
+	if !ok || e.UserID != userID || e.Status != db.EmailScheduled {
+		return nil, repositories.ErrNotFound
+	}
+	e.Recipient, e.Subject, e.Body, e.ResumeID = edit.Recipient, edit.Subject, edit.Body, edit.ResumeID
+	e.ScheduledAt, e.ScheduleTaskID = edit.ScheduledAt, edit.ScheduleTaskID
+	c := *e
+	return &c, nil
+}
+
 type fakeGmail struct {
 	GmailService
 	err *models.ApiError
@@ -261,7 +275,33 @@ func (m *memDrafts) Latest(_ context.Context, userID, jobID, hash, language, ton
 	defer m.mu.Unlock()
 	for i := len(m.rows) - 1; i >= 0; i-- {
 		r := m.rows[i]
-		if r.UserID == userID && r.JobID == jobID && r.InputHash == hash && r.Language == language && r.Tone == tone {
+		if r.UserID == userID && r.JobID != nil && *r.JobID == jobID && r.InputHash == hash && r.Language == language && r.Tone == tone {
+			return &r, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
+// LatestByURL finds like the repository: the newest letter for the link, input, language and tone.
+func (m *memDrafts) LatestByURL(_ context.Context, userID, link, hash, language, tone string) (*db.AIDraft, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.rows) - 1; i >= 0; i-- {
+		r := m.rows[i]
+		if r.UserID == userID && r.SourceURL != nil && *r.SourceURL == link && r.InputHash == hash && r.Language == language && r.Tone == tone {
+			return &r, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
+// LatestAnyByURL finds like the repository: the newest letter for the link, language and tone, whatever its input.
+func (m *memDrafts) LatestAnyByURL(_ context.Context, userID, link, language, tone string) (*db.AIDraft, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.rows) - 1; i >= 0; i-- {
+		r := m.rows[i]
+		if r.UserID == userID && r.SourceURL != nil && *r.SourceURL == link && r.Language == language && r.Tone == tone {
 			return &r, nil
 		}
 	}
@@ -442,11 +482,11 @@ func TestScheduleDispatchAndCancel(t *testing.T) {
 	assert.Equal(t, db.EmailScheduled, e.Status)
 	assert.Equal(t, []string{e.ID}, h.sched.scheduled)
 
-	out, apiErr := h.svc.DispatchScheduled(context.Background(), e.ID)
+	out, apiErr := dispatchAt(h.svc, at, e.ID)
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailSent, out.Status)
 	// A second dispatch (scheduler retry) must not send again.
-	out, apiErr = h.svc.DispatchScheduled(context.Background(), e.ID)
+	out, apiErr = dispatchAt(h.svc, at, e.ID)
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailSent, out.Status)
 	assert.Len(t, h.mailer.sent, 1)
@@ -457,7 +497,7 @@ func TestScheduleDispatchAndCancel(t *testing.T) {
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailCancelled, c.Status)
 	assert.Equal(t, []string{"task-1"}, h.sched.cancelled)
-	out, apiErr = h.svc.DispatchScheduled(context.Background(), e2.ID)
+	out, apiErr = dispatchAt(h.svc, at, e2.ID)
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailCancelled, out.Status)
 	assert.Len(t, h.mailer.sent, 1)
@@ -611,7 +651,7 @@ func TestEmailEventsSayWhetherTheSchedulerSentIt(t *testing.T) {
 	later, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
 	require.Nil(t, apiErr)
 	assert.Len(t, h.events.got, 1, "scheduling sends nothing yet")
-	_, apiErr = h.svc.DispatchScheduled(context.Background(), later.ID)
+	_, apiErr = dispatchAt(h.svc, at, later.ID)
 	require.Nil(t, apiErr)
 	require.Len(t, h.events.got, 2)
 	assert.Equal(t, map[string]any{"email_id": later.ID, "user_id": uid, "scheduled": true}, h.events.got[1].payload)
@@ -630,7 +670,7 @@ func TestEmailFailureEventAndBrokerDown(t *testing.T) {
 	e, apiErr := h.svc.ScheduleEmail(context.Background(), uid, api.ScheduleEmailRequest{SendEmailRequest: sendReq(), ScheduledAt: at})
 	require.Nil(t, apiErr)
 	h.mailer.err = errors.New("boom")
-	_, _ = h.svc.DispatchScheduled(context.Background(), e.ID)
+	_, _ = dispatchAt(h.svc, at, e.ID)
 	assert.Equal(t, db.EmailFailed, h.repo.rows[e.ID].Status)
 	require.Len(t, h.events.got, 1)
 	assert.Equal(t, core.EventEmailFailed, h.events.got[0].name)
@@ -686,7 +726,7 @@ func TestSendWithoutSubscriptionCarriesTheImportedFile(t *testing.T) {
 	assert.Len(t, h.mailer.sent, 1)
 
 	// The scheduled one leaves with the imported file too.
-	out, apiErr := h.svc.DispatchScheduled(context.Background(), s.ID)
+	out, apiErr := dispatchAt(h.svc, at, s.ID)
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailSent, out.Status)
 	assert.Equal(t, []byte("as imported"), h.mailer.sent[1].Attachment.Data)
@@ -840,4 +880,14 @@ func TestAILetterNotInThePlan(t *testing.T) {
 	assert.Equal(t, http.StatusBadGateway, apiErr.Code)
 	n, _ := svc.Drafts.CountSince(context.Background(), uid, time.Time{})
 	assert.Zero(t, n, "a letter the AI did not write is not counted")
+}
+
+// dispatchAt is schedule-api dispatching an email at the time it was scheduled for (the service's clock moved
+// there for the call only).
+func dispatchAt(svc EmailService, at time.Time, id string) (*db.Email, *models.ApiError) {
+	s := svc.(*emailService)
+	prev := s.Now
+	s.Now = func() time.Time { return at }
+	defer func() { s.Now = prev }()
+	return s.DispatchScheduled(context.Background(), id)
 }

@@ -25,7 +25,36 @@ func New(baseURL, apiKey string) *Client {
 	}
 }
 
-var _ core.JobSource = (*Client)(nil)
+var (
+	_ core.JobSource   = (*Client)(nil)
+	_ core.OfferReader = (*Client)(nil)
+)
+
+// ReadOffer calls POST /internal/offers/read: the offer behind a link the student found elsewhere, or in the text
+// they pasted (then nothing is fetched). An offer job-api cannot read is core.ErrPeerUnprocessable.
+func (c *Client) ReadOffer(ctx context.Context, rawURL, text string) (*core.OfferText, error) {
+	var out struct {
+		Source      string `json:"source"`
+		Title       string `json:"title"`
+		Company     string `json:"company"`
+		Location    string `json:"location"`
+		Description string `json:"description"`
+		ApplyEmail  string `json:"apply_email"`
+	}
+	body := struct {
+		URL  string `json:"url"`
+		Text string `json:"text,omitempty"`
+	}{URL: rawURL, Text: text}
+	err := httpx.Do(ctx, c.HTTP, httpx.Request{
+		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/internal/offers/read"), APIKey: c.APIKey, Body: body,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &core.OfferText{
+		Source: out.Source, Title: out.Title, Company: out.Company, Description: out.Description, ApplyEmail: out.ApplyEmail,
+	}, nil
+}
 
 // Job calls GET /jobs/:id on behalf of the user.
 func (c *Client) Job(ctx context.Context, bearer, id string) (*core.JobInfo, error) {

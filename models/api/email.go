@@ -65,3 +65,43 @@ type MatchKeywords struct {
 	Matched []string `json:"matched"`
 	Missing []string `json:"missing"`
 }
+
+// DraftFromLinkRequest is the body of POST /emails/draft-from-link: an offer the student found elsewhere, by its
+// link. OfferText is the offer as they pasted it, when its site cannot be read.
+type DraftFromLinkRequest struct {
+	URL       string `json:"url" binding:"required,max=2048"`
+	OfferText string `json:"offer_text" binding:"max=40000"`
+	ResumeID  string `json:"resume_id" binding:"omitempty,uuid"`
+	Language  string `json:"language" binding:"omitempty,oneof=fr en ar"`
+	Tone      string `json:"tone" binding:"omitempty,oneof=formal friendly"`
+	Fresh     bool   `json:"fresh"`
+}
+
+// LinkOffer is the offer as it was read: where it comes from ("9itchi", "linkedin" or the host of the link).
+type LinkOffer struct {
+	Source  string `json:"source"`
+	Title   string `json:"title"`
+	Company string `json:"company"`
+}
+
+// DraftFromLinkResponse is the AI's letter for the offer behind a link. JobID is set when the link was a 9itchi
+// offer.
+type DraftFromLinkResponse struct {
+	Subject string    `json:"subject"`
+	Body    string    `json:"body"`
+	Limit   *int      `json:"limit"`
+	Used    int       `json:"used"`
+	JobID   *string   `json:"job_id"`
+	Offer   LinkOffer `json:"offer"`
+}
+
+// UpdateEmailRequest is the body of PATCH /emails/:id: what changes in a scheduled email (absent: unchanged).
+// AttachCV false sends it without a CV; true attaches ResumeID, or the CV it already carries.
+type UpdateEmailRequest struct {
+	To          *string    `json:"to" binding:"omitempty,email,max=254"`
+	Subject     *string    `json:"subject" binding:"omitempty,max=200"`
+	Body        *string    `json:"body" binding:"omitempty,max=10000"`
+	ScheduledAt *time.Time `json:"scheduled_at"`
+	AttachCV    *bool      `json:"attach_cv"`
+	ResumeID    *string    `json:"resume_id" binding:"omitempty,uuid"`
+}

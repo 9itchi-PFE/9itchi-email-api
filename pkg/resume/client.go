@@ -29,35 +29,59 @@ func New(baseURL, apiKey string) *Client {
 	}
 }
 
-var _ core.ResumeSource = (*Client)(nil)
+var (
+	_ core.ResumeSource = (*Client)(nil)
+	_ core.SkillSource  = (*Client)(nil)
+)
 
 // maxPDFBytes is the largest attachment accepted from the resume service (Gmail allows 25 MB per email).
 const maxPDFBytes = 10 << 20
 
-// Summary calls GET /resumes/:id on behalf of the user and flattens the CV to a few lines of text.
-func (c *Client) Summary(ctx context.Context, bearer, id string) (string, error) {
-	var out struct {
-		Title   string `json:"title"`
-		Content struct {
-			Contact struct {
-				Name     string `json:"name"`
-				Headline string `json:"headline"`
-			} `json:"contact"`
-			Summary    string   `json:"summary"`
-			Skills     []string `json:"skills"`
-			Experience []struct {
-				Company string `json:"company"`
-				Title   string `json:"title"`
-			} `json:"experience"`
-			Education []struct {
-				School string `json:"school"`
-				Degree string `json:"degree"`
-			} `json:"education"`
-		} `json:"content"`
-	}
+// resumeView is the part of GET /resumes/:id read here.
+type resumeView struct {
+	Title   string `json:"title"`
+	Content struct {
+		Contact struct {
+			Name     string `json:"name"`
+			Headline string `json:"headline"`
+		} `json:"contact"`
+		Summary    string   `json:"summary"`
+		Skills     []string `json:"skills"`
+		Experience []struct {
+			Company string `json:"company"`
+			Title   string `json:"title"`
+		} `json:"experience"`
+		Education []struct {
+			School string `json:"school"`
+			Degree string `json:"degree"`
+		} `json:"education"`
+	} `json:"content"`
+}
+
+// get calls GET /resumes/:id on behalf of the user.
+func (c *Client) get(ctx context.Context, bearer, id string) (*resumeView, error) {
+	var out resumeView
 	err := httpx.Do(ctx, c.HTTP, httpx.Request{
 		Method: http.MethodGet, URL: httpx.URL(c.BaseURL, "/resumes/"+url.PathEscape(id)), Bearer: bearer,
 	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Skills calls GET /resumes/:id on behalf of the user: the skills the CV lists.
+func (c *Client) Skills(ctx context.Context, bearer, id string) ([]string, error) {
+	out, err := c.get(ctx, bearer, id)
+	if err != nil {
+		return nil, err
+	}
+	return out.Content.Skills, nil
+}
+
+// Summary calls GET /resumes/:id on behalf of the user and flattens the CV to a few lines of text.
+func (c *Client) Summary(ctx context.Context, bearer, id string) (string, error) {
+	out, err := c.get(ctx, bearer, id)
 	if err != nil {
 		return "", err
 	}

@@ -16,7 +16,7 @@ func TestEraseUser(t *testing.T) {
 	ctx := context.Background()
 	repo := NewEraseRepository(store)
 	const gone, kept = "00000000-0000-4000-8000-0000000000e1", "00000000-0000-4000-8000-0000000000e2"
-	const count = `SELECT (SELECT count(*) FROM applications WHERE user_id = $1) + (SELECT count(*) FROM emails WHERE user_id = $1) + (SELECT count(*) FROM gmail_connections WHERE user_id = $1) + (SELECT count(*) FROM job_matches WHERE user_id = $1) + (SELECT count(*) FROM ai_drafts WHERE user_id = $1)`
+	const count = `SELECT (SELECT count(*) FROM applications WHERE user_id = $1) + (SELECT count(*) FROM emails WHERE user_id = $1) + (SELECT count(*) FROM gmail_connections WHERE user_id = $1) + (SELECT count(*) FROM job_matches WHERE user_id = $1) + (SELECT count(*) FROM ai_drafts WHERE user_id = $1) + (SELECT count(*) FROM recruiter_searches WHERE user_id = $1) + (SELECT count(*) FROM recruiters WHERE user_id = $1)`
 	left := func(id string) int {
 		var n int
 		require.NoError(t, store.Conn(ctx).QueryRow(ctx, count, id).Scan(&n))
@@ -27,19 +27,20 @@ func TestEraseUser(t *testing.T) {
 			`INSERT INTO gmail_connections (user_id) VALUES ($1)`,
 			`INSERT INTO ai_drafts (user_id, job_id, language, tone, input_hash, subject, body) VALUES ($1, gen_random_uuid(), 'fr', 'formal', repeat('a', 64), 's', 'b')`,
 			`INSERT INTO job_matches (user_id, job_id, resume_id, language, input_hash, score, level) VALUES ($1, gen_random_uuid(), gen_random_uuid(), 'fr', repeat('a', 64), 50, 'partial')`,
+			`WITH s AS (INSERT INTO recruiter_searches (user_id, query, query_hash, provider) VALUES ($1, '{}', repeat('a', 64), 'fake') RETURNING id) INSERT INTO recruiters (user_id, search_id, dedupe_key, name, provider) SELECT $1, id, 'k', 'n', 'fake' FROM s`,
 			`WITH e AS (INSERT INTO emails (user_id, tracking_id) VALUES ($1, gen_random_uuid()) RETURNING id) INSERT INTO applications (user_id, job_id, email_id) SELECT $1, gen_random_uuid(), id FROM e`,
 		} {
 			_, err := store.Conn(ctx).Exec(ctx, q, id)
 			require.NoError(t, err, q)
 		}
 	}
-	require.Equal(t, 5, left(gone))
+	require.Equal(t, 7, left(gone))
 
 	rows, err := repo.EraseUser(ctx, gone)
 	require.NoError(t, err)
 	assert.Positive(t, rows)
 	assert.Zero(t, left(gone))
-	assert.Equal(t, 5, left(kept), "another student keeps everything")
+	assert.Equal(t, 7, left(kept), "another student keeps everything")
 
 	rows, err = repo.EraseUser(ctx, gone)
 	require.NoError(t, err, "erasing again is not an error")
