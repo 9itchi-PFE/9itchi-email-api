@@ -37,7 +37,7 @@ func (c *Client) Draft(ctx context.Context, bearer string, in core.DraftInput) (
 		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/ai/emails/draft"), Bearer: bearer, APIKey: c.APIKey,
 		Body: map[string]string{
 			"job_title": in.JobTitle, "company": in.Company, "job_description": in.JobDescription,
-			"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone,
+			"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone, "goal": in.Goal,
 		},
 	}, &out)
 	return out.Subject, out.Body, err

@@ -175,6 +175,7 @@ func TestDraftForRecruiter(t *testing.T) {
 	assert.Equal(t, "Bonjour (1)", out.Body)
 	assert.Equal(t, 1, out.Used)
 	assert.Equal(t, "Stage PFE data", h.draft.in.JobTitle)
+	assert.Equal(t, "Stage PFE data", h.draft.in.Goal, "the goal also reaches the AI as the aim of the email")
 	assert.Equal(t, "Acme", h.draft.in.Company)
 	assert.Contains(t, h.draft.in.JobDescription, "Responsable RH")
 	assert.Contains(t, h.draft.in.JobDescription, "Stage PFE data")
