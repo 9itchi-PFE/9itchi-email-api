@@ -74,3 +74,32 @@ func TestReadOffer(t *testing.T) {
 	_, err = New(srv.URL, "wrong").ReadOffer(context.Background(), "https://jobs.example/1", "")
 	assert.ErrorIs(t, err, core.ErrPeerUnavailable)
 }
+
+func TestOfferCompanies(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "key" || r.URL.Path != "/internal/companies/search" || r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			Terms   []string `json:"terms"`
+			Country string   `json:"country"`
+			Limit   int      `json:"limit"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Country != "TN" || body.Limit != 30 || len(body.Terms) != 2 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"company":"Acme","company_key":"acme","domain":"acme.tn","description":"d","city":"Tunis","country":"TN","titles":["Stage data"],"matched_terms":["data"]}]}`))
+	}))
+	defer srv.Close()
+
+	got, err := New(srv.URL, "key").OfferCompanies(context.Background(), []string{"data", "python"}, "TN", 30)
+	require.NoError(t, err)
+	assert.Equal(t, []core.OfferCompany{{Company: "Acme", Domain: "acme.tn", Description: "d", City: "Tunis", Country: "TN",
+		Titles: []string{"Stage data"}, MatchedTerms: []string{"data"}}}, got)
+
+	_, err = New(srv.URL, "wrong").OfferCompanies(context.Background(), []string{"data"}, "TN", 30)
+	assert.ErrorIs(t, err, core.ErrPeerUnavailable)
+}

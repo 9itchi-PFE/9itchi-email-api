@@ -22,12 +22,15 @@ import (
 )
 
 const (
-	// recruiterLimit is how many people one search asks the provider for.
-	recruiterLimit = 20
 	// maxSearchSkills is how many skills of the CV go into a search.
 	maxSearchSkills = 10
 	// recruiterListLimit is how many people GET /recruiters returns.
 	recruiterListLimit = 200
+	// defaultContacts is how many people a search finds when the student does not say; maxContacts the most.
+	defaultContacts = 5
+	maxContacts     = 10
+	// searchProvider is what recruiter_searches.provider says: the pool and the finders chain.
+	searchProvider = "chain"
 )
 
 // tunis is the time zone the daily limit follows (no daylight saving since 2009).
@@ -35,7 +38,7 @@ var tunis = time.FixedZone("Africa/Tunis", 3600)
 
 // RecruiterService finds recruiters for a student (Recruiter Radar). Handlers stay thin.
 type RecruiterService interface {
-	// POST /recruiters/search: recruiters for a CV's skills, keywords, a company or a domain
+	// POST /recruiters/search: companies that fit what the student looks for and the right people there
 	Search(ctx context.Context, userID string, req api.RecruiterSearchRequest) (*api.RecruiterSearchResponse, *models.ApiError)
 	// GET /recruiters: every recruiter found for the student, each person once
 	List(ctx context.Context, userID string) (*api.RecruitersResponse, *models.ApiError)
@@ -45,12 +48,22 @@ type RecruiterService interface {
 
 // RecruiterDeps are the collaborators of the recruiter service (all mockable).
 type RecruiterDeps struct {
-	Repo   repositories.RecruiterRepository
-	Finder core.RecruiterFinder
-	Skills core.SkillSource
-	Quotas core.QuotaSource
-	Config utils.AppConfig
-	Now    func() time.Time
+	Repo repositories.RecruiterRepository
+	// Pool is the shared prospect pool (companies, contacts, lookups).
+	Pool repositories.ProspectRepository
+	// Offers gives the companies of the platform's open offers (nil: none).
+	Offers core.OfferCompanySource
+	// Finders are the contact finders in chain order; Discoverers the company discoverers.
+	Finders     []core.ContactFinder
+	Discoverers []core.CompanyDiscoverer
+	// Caps is the monthly credit cap per provider name (absent: no cap). Credits receives the credits a provider
+	// spent (statistics-api); nil drops them.
+	Caps    map[string]int
+	Credits func(provider string, amount int64)
+	Skills  core.SkillSource
+	Quotas  core.QuotaSource
+	Config  utils.AppConfig
+	Now     func() time.Time
 }
 
 type recruiterService struct {
@@ -101,34 +114,42 @@ func (s *recruiterService) Allowance(ctx context.Context, userID string) (*api.R
 }
 
 func (s *recruiterService) Search(ctx context.Context, userID string, req api.RecruiterSearchRequest) (*api.RecruiterSearchResponse, *models.ApiError) {
-	domain, ok := hostOf(req.Domain)
-	if !ok {
-		return nil, apiError(http.StatusBadRequest, "invalid domain")
+	if req.ResumeID == "" {
+		return nil, apiError(http.StatusBadRequest, "resume_id is required")
 	}
-	q := core.RecruiterQuery{
-		Keywords: normalizeTerms(req.Keywords), Company: strings.Join(strings.Fields(req.Company), " "),
-		Domain: domain, Location: strings.Join(strings.Fields(req.Location), " "), Limit: recruiterLimit,
+	contacts := req.Contacts
+	if contacts == 0 {
+		contacts = defaultContacts
 	}
-	if req.ResumeID == "" && len(q.Keywords) == 0 && q.Company == "" && q.Domain == "" {
-		return nil, apiError(http.StatusBadRequest, "give a CV, keywords, a company or a domain")
+	if contacts < 1 || contacts > maxContacts {
+		return nil, apiError(http.StatusBadRequest, "contacts must be between 1 and 10")
 	}
-	if req.ResumeID != "" {
-		token, err := utils.IssueToken(s.Config, utils.Claims{ID: userID, Role: "user", Type: utils.TokenAccess}, accessTokenTTL)
-		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal error")
-		}
-		skills, err := s.Skills.Skills(ctx, token, req.ResumeID)
-		if err != nil {
-			return nil, peerError(err, "resume not found")
-		}
-		q.Skills = normalizeTerms(skills)
-		if len(q.Skills) > maxSearchSkills {
-			q.Skills = q.Skills[:maxSearchSkills]
-		}
+	country := strings.ToUpper(strings.TrimSpace(req.Country))
+	if country == "" {
+		country = "TN"
 	}
-	key, _ := json.Marshal(core.RecruiterQuery{
-		Skills: q.Skills, Keywords: q.Keywords, Company: strings.ToLower(q.Company), Domain: q.Domain,
-		Location: strings.ToLower(q.Location), Limit: q.Limit,
+	if !countryRe.MatchString(country) {
+		return nil, apiError(http.StatusBadRequest, "invalid country")
+	}
+	token, err := utils.IssueToken(s.Config, utils.Claims{ID: userID, Role: "user", Type: utils.TokenAccess}, accessTokenTTL)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal error")
+	}
+	skills, err := s.Skills.Skills(ctx, token, req.ResumeID)
+	if err != nil {
+		return nil, peerError(err, "resume not found")
+	}
+	q := prospectQuery{
+		Skills: normalizeTerms(skills), Keywords: normalizeTerms(req.Keywords),
+		Goal: strings.ToLower(strings.Join(strings.Fields(req.Goal), " ")), Contract: req.Contract, Country: country,
+		City: strings.Join(strings.Fields(req.City), " "), Contacts: contacts,
+	}
+	if len(q.Skills) > maxSearchSkills {
+		q.Skills = q.Skills[:maxSearchSkills]
+	}
+	key, _ := json.Marshal(prospectQuery{
+		Skills: q.Skills, Keywords: q.Keywords, Goal: q.Goal, Contract: q.Contract, Country: q.Country,
+		City: strings.ToLower(q.City), Contacts: q.Contacts,
 	})
 	sum := sha256.Sum256(key)
 	hash := hex.EncodeToString(sum[:])
@@ -139,7 +160,7 @@ func (s *recruiterService) Search(ctx context.Context, userID string, req api.Re
 		if err != nil {
 			return nil, repoError(err, "search not found")
 		}
-		return s.searchResponse(ctx, userID, prev, items, true)
+		return s.searchResponse(ctx, userID, prev, items, true, api.ProspectStats{})
 	} else if !errors.Is(err, repositories.ErrNotFound) {
 		return nil, repoError(err, "search not found")
 	}
@@ -155,29 +176,29 @@ func (s *recruiterService) Search(ctx context.Context, userID string, req api.Re
 		return nil, apiError(http.StatusPaymentRequired, "daily limit of recruiter searches reached")
 	}
 
-	found, err := s.Finder.Find(ctx, q)
-	if err != nil {
-		// Only the provider and the error: never the people, nor what the student searched for.
-		utils.Logger.Logger.Warnw("recruiter provider error", "provider", s.Finder.Name(), "error", err)
-		return nil, apiError(http.StatusBadGateway, "recruiter search is unavailable")
-	}
-	rows := toRecruiterRows(found, q.Limit)
-	search, saved, err := s.Repo.SaveSearch(ctx, &db.RecruiterSearch{
-		UserID: userID, Query: key, QueryHash: hash, Provider: s.Finder.Name(),
-	}, rows)
+	pctx, cancel := context.WithTimeout(ctx, prospectTimeout)
+	picks, stats, err := s.prospect(pctx, userID, q)
+	cancel()
 	if err != nil {
 		return nil, repoError(err, "search not found")
 	}
-	return s.searchResponse(ctx, userID, search, saved, false)
+	search, saved, err := s.Repo.SaveSearch(ctx, &db.RecruiterSearch{
+		UserID: userID, Query: key, QueryHash: hash, Provider: searchProvider,
+	}, toProspectRows(picks))
+	if err != nil {
+		return nil, repoError(err, "search not found")
+	}
+	return s.searchResponse(ctx, userID, search, saved, false, stats)
 }
 
-func (s *recruiterService) searchResponse(ctx context.Context, userID string, search *db.RecruiterSearch, rows []db.Recruiter, cached bool) (*api.RecruiterSearchResponse, *models.ApiError) {
+func (s *recruiterService) searchResponse(ctx context.Context, userID string, search *db.RecruiterSearch, rows []db.Recruiter, cached bool, stats api.ProspectStats) (*api.RecruiterSearchResponse, *models.ApiError) {
+	sortRecruiters(rows)
 	a, apiErr := s.allowance(ctx, userID)
 	if apiErr != nil {
 		return nil, apiErr
 	}
 	return &api.RecruiterSearchResponse{
-		SearchID: search.ID, Provider: search.Provider, Cached: cached, Items: toRecruiterItems(rows), Allowance: *a,
+		SearchID: search.ID, Cached: cached, Items: toRecruiterItems(rows), Allowance: *a, Stats: stats,
 	}, nil
 }
 
@@ -189,45 +210,13 @@ func (s *recruiterService) List(ctx context.Context, userID string) (*api.Recrui
 	return &api.RecruitersResponse{Items: toRecruiterItems(rows)}, nil
 }
 
-// toRecruiterRows keeps at most limit people with a name, confidence within 0 to 100, most certain first, each
-// with the key that tells the same person apart across searches.
-func toRecruiterRows(found []core.Recruiter, limit int) []db.Recruiter {
-	out := make([]db.Recruiter, 0, len(found))
-	for _, f := range found {
-		name := strings.TrimSpace(f.Name)
-		if name == "" {
-			continue
-		}
-		r := db.Recruiter{
-			Name: name, Title: strings.TrimSpace(f.Title), Company: strings.TrimSpace(f.Company),
-			Domain: strings.ToLower(strings.TrimSpace(f.Domain)), Email: strings.TrimSpace(f.Email),
-			LinkedInURL: strings.TrimSpace(f.LinkedInURL), Confidence: min(max(f.Confidence, 0), 100),
-		}
-		switch {
-		case r.Email != "":
-			r.DedupeKey = strings.ToLower(r.Email)
-		case r.LinkedInURL != "":
-			r.DedupeKey = strings.ToLower(r.LinkedInURL)
-		default:
-			r.DedupeKey = strings.ToLower(r.Name + "|" + r.Company)
-		}
-		out = append(out, r)
-		if len(out) == limit {
-			break
-		}
-	}
-	slices.SortStableFunc(out, func(a, b db.Recruiter) int {
-		return cmp.Or(cmp.Compare(b.Confidence, a.Confidence), strings.Compare(a.Name, b.Name))
-	})
-	return out
-}
-
 func toRecruiterItems(rows []db.Recruiter) []api.RecruiterItem {
 	out := make([]api.RecruiterItem, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, api.RecruiterItem{
 			ID: r.ID, Name: r.Name, Title: r.Title, Company: r.Company, Domain: r.Domain, Email: r.Email,
-			LinkedInURL: r.LinkedInURL, Confidence: r.Confidence, CreatedAt: r.CreatedAt,
+			LinkedInURL: r.LinkedInURL, Confidence: r.Confidence, Verified: r.Verified, CompanySummary: r.CompanySummary,
+			MatchedKeywords: nonNilTerms(r.MatchedKeywords), CreatedAt: r.CreatedAt,
 		})
 	}
 	return out
@@ -264,4 +253,21 @@ func hostOf(raw string) (string, bool) {
 		return "", false
 	}
 	return host, true
+}
+
+// nonNilTerms keeps a list from reading as null in JSON.
+func nonNilTerms(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// sortRecruiters orders the people of a search the same way fresh or given back: recruiters first, then verified
+// addresses, then confidence.
+func sortRecruiters(rows []db.Recruiter) {
+	slices.SortStableFunc(rows, func(a, b db.Recruiter) int {
+		return cmp.Or(cmp.Compare(titleBucket(b.Title, ""), titleBucket(a.Title, "")), cmp.Compare(boolInt(b.Verified), boolInt(a.Verified)),
+			cmp.Compare(b.Confidence, a.Confidence), strings.Compare(a.Name, b.Name))
+	})
 }

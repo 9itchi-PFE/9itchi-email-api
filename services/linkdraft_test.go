@@ -157,8 +157,9 @@ func TestDraftForRecruiter(t *testing.T) {
 	h, svc, _ := linkHarness(map[string]int{core.QuotaAIDrafts: 1})
 	recs := &memRecruiters{at: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) }}
 	svc.Recruiters = recs
-	_, _, _ = recs.SaveSearch(context.Background(), &db.RecruiterSearch{UserID: uid, Provider: "test"}, []db.Recruiter{
-		{Name: "Sarra Gharbi", Title: "Responsable RH", Company: "Acme", Email: "sarra@acme.example", DedupeKey: "sarra@acme.example"},
+	_, _, _ = recs.SaveSearch(context.Background(), &db.RecruiterSearch{UserID: uid, Provider: "chain", Query: []byte(`{"contract":"pfe"}`)}, []db.Recruiter{
+		{Name: "Sarra Gharbi", Title: "Responsable RH", Company: "Acme", Email: "sarra@acme.example", DedupeKey: "sarra@acme.example",
+			CompanySummary: "Acme builds data platforms."},
 	})
 	id := "44444444-4444-4444-4444-444444444444"
 	recs.people[0].ID = id
@@ -179,6 +180,8 @@ func TestDraftForRecruiter(t *testing.T) {
 	assert.Equal(t, "Acme", h.draft.in.Company)
 	assert.Contains(t, h.draft.in.JobDescription, "Responsable RH")
 	assert.Contains(t, h.draft.in.JobDescription, "Stage PFE data")
+	assert.Contains(t, h.draft.in.JobDescription, "Contract wanted: pfe", "the contract comes from the search")
+	assert.Contains(t, h.draft.in.JobDescription, "Acme builds data platforms.", "the company summary is context")
 	assert.NotContains(t, h.draft.in.JobDescription, "Sarra", "the recruiter's name never reaches the AI")
 	assert.NotContains(t, h.draft.in.JobDescription, "sarra@")
 	assert.Equal(t, "Ines, ENIS", h.draft.in.CandidateSummary)

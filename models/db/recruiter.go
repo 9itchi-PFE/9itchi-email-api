@@ -30,4 +30,11 @@ type Recruiter struct {
 	Confidence  int
 	Provider    string
 	CreatedAt   time.Time
+	// ContactID is the pool person the row came from ("" on rows made before the pool, or once that person left it).
+	ContactID string
+	// CompanySummary is a short description of the company from the pool; MatchedKeywords the terms of the search
+	// found in what the pool knows of the company. Verified: the provider said the address is valid.
+	CompanySummary  string
+	MatchedKeywords []string
+	Verified        bool
 }

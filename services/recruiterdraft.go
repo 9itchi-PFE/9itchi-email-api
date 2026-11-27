@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -16,8 +17,9 @@ import (
 const spontaneousTitle = "Candidature spontanée"
 
 // DraftForRecruiter writes a spontaneous application to one recruiter of the student. The letter is kept and
-// counted like a letter for a link, under the source "recruiter:<id>". Only the recruiter's title and company reach
-// the AI, never their name nor address (the student adds the greeting).
+// counted like a letter for a link, under the source "recruiter:<id>". Only the recruiter's title and company, the
+// company summary from the pool and the search's goal and contract reach the AI, never the recruiter's name nor
+// address (the student adds the greeting).
 func (s *emailService) DraftForRecruiter(ctx context.Context, userID, id string, req api.RecruiterDraftRequest) (*api.DraftEmailResponse, *models.ApiError) {
 	if !uuidRe.MatchString(id) {
 		return nil, apiError(http.StatusNotFound, "recruiter not found")
@@ -43,7 +45,11 @@ func (s *emailService) DraftForRecruiter(ctx context.Context, userID, id string,
 		}
 		return cached, nil
 	}
+	search := s.recruiterSearchQuery(ctx, userID, r.SearchID)
 	goal := strings.Join(strings.Fields(req.Goal), " ")
+	if goal == "" {
+		goal = search.Goal
+	}
 	title := goal
 	if title == "" {
 		title = spontaneousTitle
@@ -56,7 +62,23 @@ func (s *emailService) DraftForRecruiter(ctx context.Context, userID, id string,
 	if goal != "" {
 		brief += " The candidate is looking for: " + goal + "."
 	}
+	if search.Contract != "" {
+		brief += " Contract wanted: " + search.Contract + "."
+	}
+	if r.CompanySummary != "" {
+		brief += " About the company: " + r.CompanySummary
+	}
 	return s.draftForSource(ctx, userID, source, req.ResumeID, req.Fresh, core.DraftInput{
 		JobTitle: title, Company: r.Company, JobDescription: brief, Language: language, Tone: tone, Goal: goal,
 	})
+}
+
+// recruiterSearchQuery is the query of the search that found a recruiter (goal, contract); empty when it cannot be
+// read (older searches, or the database failed: the letter is written without it).
+func (s *emailService) recruiterSearchQuery(ctx context.Context, userID, searchID string) prospectQuery {
+	var q prospectQuery
+	if search, err := s.Recruiters.GetSearch(ctx, userID, searchID); err == nil {
+		_ = json.Unmarshal(search.Query, &q)
+	}
+	return q
 }

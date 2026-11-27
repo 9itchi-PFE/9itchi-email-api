@@ -35,11 +35,19 @@ type AppConfig struct {
 	ClientURL string
 	// TrackerPublicURL is the public base URL of the tracking pixel (opened by the recipient's mail client).
 	TrackerPublicURL string
-	// RecruiterProvider names the provider of recruiter contacts registered in pkg/recruiters (default "fake", which
-	// invents people at .example domains). Any other provider needs RecruiterAPIKey; never log it.
-	RecruiterProvider string
-	RecruiterAPIKey   string
-	RecruiterBaseURL  string
+	// RecruiterChain is the contact finders of Recruiter Radar, in order (env RECRUITER_CHAIN, default
+	// "website,hunter,apollo"; names registered in pkg/recruiters, an unknown one fails startup). CompanyDiscovery is the
+	// company discoverers (env COMPANY_DISCOVERY, default "hunter"; empty = none). A source without its key is skipped.
+	RecruiterChain   []string
+	CompanyDiscovery []string
+	// HunterAPIKey and ApolloAPIKey are the providers' keys (a token an admin set in statistics-api wins). Never log them.
+	HunterAPIKey string
+	ApolloAPIKey string
+	// HunterMonthlyCap (searches) and ApolloMonthlyCap (reveals) cap the credits spent per UTC month (default 50 each).
+	HunterMonthlyCap int
+	ApolloMonthlyCap int
+	// StatisticsAPIURL is the admin credit tracker (empty = off).
+	StatisticsAPIURL string
 }
 
 // LoadConfig loads configuration from environment variables.
@@ -66,9 +74,13 @@ func LoadConfig() AppConfig {
 		GoogleRedirectURL:      getStringWithDefault("GMAIL_REDIRECT_URL", "http://localhost:8085/gmail/callback"),
 		ClientURL:              getStringWithDefault("CLIENT_URL", "http://localhost:3000"),
 		TrackerPublicURL:       getStringWithDefault("TRACKER_PUBLIC_URL", "http://localhost:8086"),
-		RecruiterProvider:      getStringWithDefault("RECRUITER_PROVIDER", "fake"),
-		RecruiterAPIKey:        getStringWithDefault("RECRUITER_API_KEY", ""),
-		RecruiterBaseURL:       getStringWithDefault("RECRUITER_BASE_URL", ""),
+		RecruiterChain:         getListWithDefault("RECRUITER_CHAIN", "website,hunter,apollo"),
+		CompanyDiscovery:       getListWithDefault("COMPANY_DISCOVERY", "hunter"),
+		HunterAPIKey:           getStringWithDefault("HUNTER_API_KEY", ""),
+		ApolloAPIKey:           getStringWithDefault("APOLLO_API_KEY", ""),
+		HunterMonthlyCap:       getIntWithDefault("HUNTER_MONTHLY_CAP", 50),
+		ApolloMonthlyCap:       getIntWithDefault("APOLLO_MONTHLY_CAP", 50),
+		StatisticsAPIURL:       getStringWithDefault("STATISTICS_API_URL", "http://9itchi-statistics-api:8090"),
 	}
 }
 
@@ -90,10 +102,14 @@ func (c AppConfig) Validate() error {
 	if c.InternalAPIKeyRequired && c.InternalAPIKey == "" {
 		bad = append(bad, "INTERNAL_API_KEY")
 	}
-	if c.RecruiterProvider == "" {
-		bad = append(bad, "RECRUITER_PROVIDER")
-	} else if c.RecruiterProvider != "fake" && c.RecruiterAPIKey == "" {
-		bad = append(bad, "RECRUITER_API_KEY (required by RECRUITER_PROVIDER)")
+	if len(c.RecruiterChain) == 0 {
+		bad = append(bad, "RECRUITER_CHAIN")
+	}
+	if c.HunterMonthlyCap < 0 {
+		bad = append(bad, "HUNTER_MONTHLY_CAP (min 0)")
+	}
+	if c.ApolloMonthlyCap < 0 {
+		bad = append(bad, "APOLLO_MONTHLY_CAP (min 0)")
 	}
 	if len(bad) > 0 {
 		return fmt.Errorf("required environment variables are missing or invalid: %s", strings.Join(bad, ", "))
@@ -114,4 +130,17 @@ func getIntWithDefault(key string, defaultValue int) int {
 func getBoolWithDefault(key string, defaultValue bool) bool {
 	viper.SetDefault(key, defaultValue)
 	return viper.GetBool(key)
+}
+
+// getListWithDefault reads a comma-separated list, trimmed, without empty items; "none" is an empty list (viper
+// reads an empty variable as unset).
+func getListWithDefault(key, defaultValue string) []string {
+	viper.SetDefault(key, defaultValue)
+	var out []string
+	for _, s := range strings.Split(viper.GetString(key), ",") {
+		if s = strings.TrimSpace(s); s != "" && s != "none" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

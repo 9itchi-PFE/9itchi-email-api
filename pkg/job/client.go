@@ -26,8 +26,9 @@ func New(baseURL, apiKey string) *Client {
 }
 
 var (
-	_ core.JobSource   = (*Client)(nil)
-	_ core.OfferReader = (*Client)(nil)
+	_ core.JobSource          = (*Client)(nil)
+	_ core.OfferReader        = (*Client)(nil)
+	_ core.OfferCompanySource = (*Client)(nil)
 )
 
 // ReadOffer calls POST /internal/offers/read: the offer behind a link the student found elsewhere, or in the text
@@ -89,4 +90,39 @@ func (c *Client) ApplyInfo(ctx context.Context, id string) (*core.JobInfo, error
 		return nil, err
 	}
 	return &core.JobInfo{Title: out.Title, Company: out.Company, Description: out.Description, ApplyEmail: out.ApplyEmail, Open: out.Open}, nil
+}
+
+// OfferCompanies calls POST /internal/companies/search: the companies of published, still-open offers that match
+// the terms (full text over title and description), with the domain job-api could tell (never an apply address).
+func (c *Client) OfferCompanies(ctx context.Context, terms []string, country string, limit int) ([]core.OfferCompany, error) {
+	var out struct {
+		Items []struct {
+			Company      string   `json:"company"`
+			Domain       string   `json:"domain"`
+			Description  string   `json:"description"`
+			City         string   `json:"city"`
+			Country      string   `json:"country"`
+			Titles       []string `json:"titles"`
+			MatchedTerms []string `json:"matched_terms"`
+		} `json:"items"`
+	}
+	body := struct {
+		Terms   []string `json:"terms"`
+		Country string   `json:"country"`
+		Limit   int      `json:"limit"`
+	}{Terms: terms, Country: country, Limit: limit}
+	err := httpx.Do(ctx, c.HTTP, httpx.Request{
+		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/internal/companies/search"), APIKey: c.APIKey, Body: body,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]core.OfferCompany, 0, len(out.Items))
+	for _, it := range out.Items {
+		items = append(items, core.OfferCompany{
+			Company: it.Company, Domain: it.Domain, Description: it.Description, City: it.City, Country: it.Country,
+			Titles: it.Titles, MatchedTerms: it.MatchedTerms,
+		})
+	}
+	return items, nil
 }
