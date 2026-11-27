@@ -17,6 +17,7 @@ type Repositories struct {
 	Draft       DraftRepository
 	Recruiter   RecruiterRepository
 	Prospect    ProspectRepository
+	PoolStats   PoolStatsRepository
 }
 
 // InitRepositories connects to PostgreSQL, applies migrations and builds the repositories.
@@ -38,6 +39,7 @@ func InitRepositories(ctx context.Context, config utils.AppConfig) (*Repositorie
 		Draft:       NewDraftRepository(store),
 		Recruiter:   NewRecruiterRepository(store),
 		Prospect:    NewProspectRepository(store),
+		PoolStats:   NewPoolStatsRepository(store),
 	}, nil
 }
 

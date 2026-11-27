@@ -184,6 +184,10 @@ func (s *recruiterService) Search(ctx context.Context, userID string, req api.Re
 	}
 	search, saved, err := s.Repo.SaveSearch(ctx, &db.RecruiterSearch{
 		UserID: userID, Query: key, QueryHash: hash, Provider: searchProvider,
+		Stats: &db.SearchStats{
+			CompaniesFromPool: stats.CompaniesFromPool, CompaniesDiscovered: stats.CompaniesDiscovered,
+			ContactsFromPool: stats.ContactsFromPool, ContactsFound: stats.ContactsFound,
+		},
 	}, toProspectRows(picks))
 	if err != nil {
 		return nil, repoError(err, "search not found")

@@ -27,6 +27,7 @@ type Services struct {
 	Match       MatchService
 	Score       ScoreService
 	Recruiter   RecruiterService
+	PoolStats   PoolStatsService
 	Clients     *Clients
 }
 
@@ -77,6 +78,14 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
 		Events: events, Config: config, Drafts: repos.Draft, Offers: clients.Job, Recruiters: repos.Recruiter,
 	})
+	caps := map[string]int{"hunter": config.HunterMonthlyCap, "apollo": config.ApolloMonthlyCap}
+	// The providers of the chain that spend credits (the capped ones), listed on every day of the admin stats.
+	var creditProviders []string
+	for _, name := range config.RecruiterChain {
+		if _, ok := caps[name]; ok && !slices.Contains(creditProviders, name) {
+			creditProviders = append(creditProviders, name)
+		}
+	}
 	matchDeps := MatchDeps{
 		Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
 	}
@@ -89,9 +98,10 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Score:       NewScoreService(matchDeps),
 		Recruiter: NewRecruiterService(RecruiterDeps{
 			Repo: repos.Recruiter, Pool: repos.Prospect, Offers: clients.Job, Finders: finders, Discoverers: discoverers,
-			Caps:    map[string]int{"hunter": config.HunterMonthlyCap, "apollo": config.ApolloMonthlyCap},
+			Caps:    caps,
 			Credits: credits.Report, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
 		}),
-		Clients: clients,
+		PoolStats: NewPoolStatsService(PoolStatsDeps{Repo: repos.PoolStats, CreditProviders: creditProviders}),
+		Clients:   clients,
 	}, nil
 }

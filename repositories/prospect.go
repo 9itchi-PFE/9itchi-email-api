@@ -30,6 +30,8 @@ type ProspectRepository interface {
 	SaveLookup(ctx context.Context, domain, provider string, resultCount, credits int) error
 	// CreditsSince sums the credits the provider used since a time.
 	CreditsSince(ctx context.Context, provider string, since time.Time) (int, error)
+	// SaveCredits appends the credits a provider just spent to the provider_credits log (credits > 0).
+	SaveCredits(ctx context.Context, provider string, credits int) error
 }
 
 type prospectRepository struct {
@@ -182,4 +184,11 @@ func (r *prospectRepository) CreditsSince(ctx context.Context, provider string, 
 	err := r.store.Conn(ctx).QueryRow(ctx, `SELECT COALESCE(sum(credits_used), 0) FROM contact_lookups
 		WHERE provider = $1 AND fetched_at >= $2`, provider, since).Scan(&n)
 	return n, MapError(err)
+}
+
+func (r *prospectRepository) SaveCredits(ctx context.Context, provider string, credits int) error {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	_, err := r.store.Conn(ctx).Exec(ctx, `INSERT INTO provider_credits (provider, credits) VALUES ($1, $2)`, provider, credits)
+	return MapError(err)
 }
