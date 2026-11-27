@@ -54,3 +54,22 @@ func TestDraftSendsTheGoal(t *testing.T) {
 	assert.Equal(t, "Bonjour", body)
 	assert.Equal(t, "Un appel", got["goal"])
 }
+
+func TestDraftSendsKeywordsOnlyWhenGiven(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = nil
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"subject":"Candidature","body":"Bonjour"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "key")
+	_, _, err := c.Draft(context.Background(), "token", core.DraftInput{JobTitle: "Stage", Keywords: []string{"C++", "paiement"}})
+	require.NoError(t, err)
+	assert.Equal(t, []any{"C++", "paiement"}, got["keywords"])
+
+	_, _, err = c.Draft(context.Background(), "token", core.DraftInput{JobTitle: "Stage"})
+	require.NoError(t, err)
+	assert.NotContains(t, got, "keywords", "older ai-api builds never see the field")
+}

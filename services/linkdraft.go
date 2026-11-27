@@ -191,6 +191,10 @@ func (s *emailService) draftForSource(ctx context.Context, userID, source, resum
 		}
 	}
 	hash := digest(in.JobTitle, in.Company, in.JobDescription, in.CandidateSummary)
+	if len(in.Keywords) > 0 {
+		// Only letters with keywords hash them, so the letters already kept stay valid.
+		hash = digest(in.JobTitle, in.Company, in.JobDescription, in.CandidateSummary, strings.Join(in.Keywords, ","))
+	}
 	if in.Kind != "" {
 		// Only a follow-up hashes its kind and first email, so the letters already kept stay valid.
 		hash = digest(in.JobTitle, in.Company, in.JobDescription, in.CandidateSummary, in.Kind, in.Previous)

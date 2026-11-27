@@ -70,6 +70,7 @@ func (s *emailService) DraftForRecruiter(ctx context.Context, userID, id string,
 	}
 	return s.draftForSource(ctx, userID, source, req.ResumeID, req.Fresh, core.DraftInput{
 		JobTitle: title, Company: r.Company, JobDescription: brief, Language: language, Tone: tone, Goal: goal,
+		Keywords: search.Keywords,
 	})
 }
 

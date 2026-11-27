@@ -36,6 +36,9 @@ func (c *Client) Draft(ctx context.Context, bearer string, in core.DraftInput) (
 		"job_title": in.JobTitle, "company": in.Company, "job_description": in.JobDescription,
 		"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone, "goal": in.Goal,
 	}
+	if len(in.Keywords) > 0 {
+		body["keywords"] = in.Keywords
+	}
 	if in.Kind != "" {
 		body["kind"], body["previous_email"], body["days_since"] = in.Kind, in.Previous, in.DaysSince
 	}

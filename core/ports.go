@@ -84,6 +84,8 @@ type DraftInput struct {
 	Tone             string
 	// Goal is what the student looks for (Recruiter Radar); ai-api writes the email around it.
 	Goal string
+	// Keywords are the terms the student chose for the search (Recruiter Radar); ai-api works in those the CV backs.
+	Keywords []string
 	// Kind is "follow_up" for a follow-up of an application (empty: a first email). Previous is the first email
 	// (subject and body) and DaysSince how many days ago it left.
 	Kind      string
