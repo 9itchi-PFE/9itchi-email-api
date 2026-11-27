@@ -585,6 +585,22 @@ func TestRecruiterListKeepsEachPersonOnce(t *testing.T) {
 	assert.Empty(t, other.Items)
 }
 
+func TestRecruiterItemLogoIsHTTPOnly(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://acme.tn/logo.png":      "https://acme.tn/logo.png",
+		"http://logo.example/a.svg":     "http://logo.example/a.svg",
+		"":                              "",
+		"javascript:alert(1)":           "",
+		"data:image/png;base64,AAAA":    "",
+		"//acme.tn/logo.png":            "",
+		"https://user:pw@acme.tn/l.png": "",
+		"https:///logo.png":             "",
+	} {
+		items := toRecruiterItems([]db.Recruiter{{ID: "r1", LogoURL: raw}})
+		assert.Equal(t, want, items[0].LogoURL, raw)
+	}
+}
+
 func TestSearchTerms(t *testing.T) {
 	q := prospectQuery{Keywords: []string{"Machine Learning", "Développement"}, Skills: []string{"python", "développement"},
 		Goal: "Je cherche un stage PFE de 6 mois en intelligence artificielle à partir de février"}

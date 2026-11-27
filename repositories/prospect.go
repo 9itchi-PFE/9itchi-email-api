@@ -43,7 +43,7 @@ func NewProspectRepository(store *Store) ProspectRepository {
 }
 
 const (
-	companyColumns = `id, domain, name, description, industry, size_range, country, city, keywords, search_text, source, created_at, updated_at`
+	companyColumns = `id, domain, name, description, industry, size_range, country, city, keywords, search_text, source, logo_url, created_at, updated_at`
 	contactColumns = `id, company_id, email, first_name, last_name, title, department, linkedin_url, source, confidence, verification,
 		verified_at, opted_out, created_at, updated_at`
 )
@@ -51,7 +51,7 @@ const (
 func scanCompany(r rowScanner) (*db.Company, error) {
 	var c db.Company
 	err := r.Scan(&c.ID, &c.Domain, &c.Name, &c.Description, &c.Industry, &c.SizeRange, &c.Country, &c.City, &c.Keywords,
-		&c.SearchText, &c.Source, &c.CreatedAt, &c.UpdatedAt)
+		&c.SearchText, &c.Source, &c.LogoURL, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -100,13 +100,15 @@ func (r *prospectRepository) SaveCompany(ctx context.Context, c *db.Company) (*d
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanCompany(r.store.Conn(ctx).QueryRow(ctx, `
-		INSERT INTO companies (domain, name, description, industry, size_range, country, city, keywords, search_text, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO companies (domain, name, description, industry, size_range, country, city, keywords, search_text, source, logo_url)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (domain) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description,
 			industry = EXCLUDED.industry, size_range = EXCLUDED.size_range, country = EXCLUDED.country, city = EXCLUDED.city,
-			keywords = EXCLUDED.keywords, search_text = EXCLUDED.search_text, updated_at = now()
+			keywords = EXCLUDED.keywords, search_text = EXCLUDED.search_text,
+			logo_url = COALESCE(NULLIF(EXCLUDED.logo_url, ''), companies.logo_url), updated_at = now()
 		RETURNING `+companyColumns,
-		c.Domain, c.Name, c.Description, c.Industry, c.SizeRange, c.Country, c.City, nonNil(c.Keywords), c.SearchText, c.Source))
+		c.Domain, c.Name, c.Description, c.Industry, c.SizeRange, c.Country, c.City, nonNil(c.Keywords), c.SearchText, c.Source,
+		c.LogoURL))
 }
 
 func (r *prospectRepository) CompanyContacts(ctx context.Context, companyID string, since time.Time, limit int) ([]db.Contact, error) {

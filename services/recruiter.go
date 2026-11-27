@@ -220,10 +220,19 @@ func toRecruiterItems(rows []db.Recruiter) []api.RecruiterItem {
 		out = append(out, api.RecruiterItem{
 			ID: r.ID, Name: r.Name, Title: r.Title, Company: r.Company, Domain: r.Domain, Email: r.Email,
 			LinkedInURL: r.LinkedInURL, Confidence: r.Confidence, Verified: r.Verified, CompanySummary: r.CompanySummary,
-			MatchedKeywords: nonNilTerms(r.MatchedKeywords), CreatedAt: r.CreatedAt,
+			MatchedKeywords: nonNilTerms(r.MatchedKeywords), LogoURL: httpLogoURL(r.LogoURL), CreatedAt: r.CreatedAt,
 		})
 	}
 	return out
+}
+
+// httpLogoURL keeps a logo URL only when it is an absolute http(s) URL with a host and no credentials, else "".
+func httpLogoURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return ""
+	}
+	return raw
 }
 
 // normalizeTerms trims, lower-cases, sorts and de-duplicates keywords or skills.

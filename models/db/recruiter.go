@@ -80,4 +80,6 @@ type Recruiter struct {
 	CompanySummary  string
 	MatchedKeywords []string
 	Verified        bool
+	// LogoURL is the logo of the pool company of ContactID, read with the row ("" when unknown or no contact).
+	LogoURL string
 }
