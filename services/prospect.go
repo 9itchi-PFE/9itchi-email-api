@@ -295,6 +295,11 @@ func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip
 		if res.Credits > 0 && s.Credits != nil {
 			s.Credits(name, int64(res.Credits))
 		}
+		if res.Credits > 0 {
+			if cerr := s.Pool.SaveCredits(ctx, name, res.Credits); cerr != nil {
+				utils.Logger.Logger.Warnw("provider credits not logged", "provider", name, "error", cerr)
+			}
+		}
 		if domain == "" && err == nil {
 			// Asked by name: the finder told the domain (else the company is skipped).
 			d, ok := hostOf(res.Domain)

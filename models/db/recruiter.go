@@ -12,6 +12,49 @@ type RecruiterSearch struct {
 	Provider    string
 	ResultCount int
 	CreatedAt   time.Time
+	// Stats is what a fresh search took from the pool and from the providers (nil: not stored, written as NULL).
+	Stats *SearchStats
+}
+
+// SearchStats are the counts of one fresh search (recruiter_searches columns, 0014).
+type SearchStats struct {
+	CompaniesFromPool   int
+	CompaniesDiscovered int
+	ContactsFromPool    int
+	ContactsFound       int
+}
+
+// PoolCounts are the live numbers of the prospect pool. Contact counts leave opted-out people out; Fresh counts
+// the people the pipeline still uses (checked or updated since a time); BySource counts people per source.
+type PoolCounts struct {
+	Companies int
+	Contacts  int
+	Verified  int
+	HR        int
+	Fresh     int
+	BySource  map[string]int
+}
+
+// SearchTotals sums the fresh searches with stored stats. PoolOnly counts the searches no provider was asked for
+// (people from the pool only).
+type SearchTotals struct {
+	Searches         int
+	ContactsFromPool int
+	ContactsFound    int
+	PoolOnly         int
+}
+
+// SearchDay is SearchTotals for one UTC day (YYYY-MM-DD).
+type SearchDay struct {
+	Day string
+	SearchTotals
+}
+
+// ProviderCreditsDay is what one provider spent on one UTC day (YYYY-MM-DD).
+type ProviderCreditsDay struct {
+	Day      string
+	Provider string
+	Credits  int
 }
 
 // Recruiter maps table recruiters: one person a search found. DedupeKey identifies the same person across

@@ -51,6 +51,18 @@ func RecruiterAllowance(svc services.RecruiterService) gin.HandlerFunc {
 	}
 }
 
+// ProspectStats: GET /admin/prospects/stats (admin) the shared pool, its hit rates and the daily credits.
+func ProspectStats(svc services.PoolStatsService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.Stats(c.Request.Context())
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // DraftForRecruiter: POST /recruiters/:id/draft (user) AI draft of a spontaneous application to a recruiter.
 func DraftForRecruiter(svc services.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {

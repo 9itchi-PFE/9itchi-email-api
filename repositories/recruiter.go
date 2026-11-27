@@ -85,11 +85,14 @@ func (r *recruiterRepository) SaveSearch(ctx context.Context, s *db.RecruiterSea
 	err := r.store.WithTx(ctx, func(ctx context.Context) error {
 		var err error
 		saved, err = scanSearch(r.store.Conn(ctx).QueryRow(ctx, `
-			INSERT INTO recruiter_searches (user_id, query, query_hash, provider, result_count) VALUES ($1, $2, $3, $4, $5)
-			RETURNING `+searchColumns, s.UserID, s.Query, s.QueryHash, s.Provider, len(found)))
+			INSERT INTO recruiter_searches (user_id, query, query_hash, provider, result_count,
+				companies_from_pool, companies_discovered, contacts_from_pool, contacts_found)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			RETURNING `+searchColumns, append([]any{s.UserID, s.Query, s.QueryHash, s.Provider, len(found)}, searchStatsArgs(s.Stats)...)...))
 		if err != nil {
 			return err
 		}
+		saved.Stats = s.Stats
 		out = make([]db.Recruiter, 0, len(found))
 		for _, f := range found {
 			x, err := scanRecruiter(r.store.Conn(ctx).QueryRow(ctx, `
@@ -110,6 +113,14 @@ func (r *recruiterRepository) SaveSearch(ctx context.Context, s *db.RecruiterSea
 		return nil, nil, err
 	}
 	return saved, out, nil
+}
+
+// searchStatsArgs are the four stats columns of a search in insert order (all NULL when not stored).
+func searchStatsArgs(s *db.SearchStats) []any {
+	if s == nil {
+		return []any{nil, nil, nil, nil}
+	}
+	return []any{s.CompaniesFromPool, s.CompaniesDiscovered, s.ContactsFromPool, s.ContactsFound}
 }
 
 func (r *recruiterRepository) ListBySearch(ctx context.Context, userID, searchID string) ([]db.Recruiter, error) {

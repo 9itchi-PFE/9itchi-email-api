@@ -138,7 +138,9 @@ type memPool struct {
 	companies []db.Company
 	contacts  []db.Contact
 	lookups   map[string]memLookup
-	at        func() time.Time
+	// spent is the provider_credits log summed per provider.
+	spent map[string]int
+	at    func() time.Time
 }
 
 type memLookup struct {
@@ -248,6 +250,16 @@ func (m *memPool) CreditsSince(_ context.Context, provider string, since time.Ti
 		}
 	}
 	return n, nil
+}
+
+func (m *memPool) SaveCredits(_ context.Context, provider string, credits int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.spent == nil {
+		m.spent = map[string]int{}
+	}
+	m.spent[provider] += credits
+	return nil
 }
 
 // testFinder answers two people at the domain asked for (a CTO and a recruiter with a verified address).
@@ -404,10 +416,12 @@ func TestRecruiterSearchPipeline(t *testing.T) {
 	assert.Equal(t, "cto@acme.tn", h.pool.contacts[0].Email, "addresses lower case")
 	assert.Equal(t, memLookup{count: 2, credits: 1, at: h.now}, h.pool.lookups["acme.tn|hunter"])
 	assert.Equal(t, int64(2), h.credited["hunter"], "credits reported to statistics")
+	assert.Equal(t, map[string]int{"hunter": 2}, h.pool.spent, "credits logged in provider_credits")
 	assert.Equal(t, 50, h.finder.got[0].MaxCredits)
 
 	require.Len(t, h.repo.searches, 1)
 	assert.Equal(t, "chain", h.repo.searches[0].Provider)
+	assert.Equal(t, &db.SearchStats{CompaniesDiscovered: 2, ContactsFound: 2}, h.repo.searches[0].Stats, "stats stored on the search")
 	assert.Contains(t, string(h.repo.searches[0].Query), `"contract":"pfe"`)
 	assert.Equal(t, "ct-2", h.repo.people[0].ContactID)
 
