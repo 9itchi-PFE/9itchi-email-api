@@ -28,6 +28,7 @@ type RecruiterItem struct {
 	Verified        bool      `json:"verified"`
 	CompanySummary  string    `json:"company_summary"`
 	MatchedKeywords []string  `json:"matched_keywords"`
+	LogoURL         string    `json:"logo_url"` // http(s) only, "" when unknown
 	CreatedAt       time.Time `json:"created_at"`
 }
 
