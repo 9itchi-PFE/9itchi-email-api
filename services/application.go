@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"9itchi-email-api/core"
 	"9itchi-email-api/models"
@@ -27,6 +28,10 @@ type ApplicationService interface {
 	UpdateApplication(ctx context.Context, userID, id string, req api.UpdateApplicationRequest) (*api.ApplicationResponse, *models.ApiError)
 	// POST /applications/:id/send: send a scheduled application now
 	SendNow(ctx context.Context, userID, id string) (*api.ApplicationResponse, *models.ApiError)
+	// POST /applications/:id/follow-up/draft: the AI writes the follow-up of an application a week without answer
+	DraftFollowUp(ctx context.Context, userID, id string, req api.FollowUpDraftRequest) (*api.DraftEmailResponse, *models.ApiError)
+	// POST /applications/:id/follow-up: send that follow-up from Gmail to the first email's recipient
+	FollowUp(ctx context.Context, userID, id string, req api.FollowUpRequest) (*api.ApplicationResponse, *models.ApiError)
 	// GET /internal/emails/:id/context: the offer an email was sent for (peer services)
 	EmailContext(ctx context.Context, emailID string) (*api.EmailContextResponse, *models.ApiError)
 }
@@ -36,11 +41,12 @@ type applicationService struct {
 	emails EmailService
 	jobs   core.JobSource
 	events core.Publisher
+	now    func() time.Time
 }
 
 // NewApplicationService builds the service; events, when given, receives application.replied.
 func NewApplicationService(repo repositories.ApplicationRepository, emails EmailService, jobs core.JobSource, events ...core.Publisher) ApplicationService {
-	s := &applicationService{repo: repo, emails: emails, jobs: jobs}
+	s := &applicationService{repo: repo, emails: emails, jobs: jobs, now: func() time.Time { return time.Now().UTC() }}
 	if len(events) > 0 {
 		s.events = events[0]
 	}
@@ -79,7 +85,7 @@ func shownStatus(a *db.Application, e *db.Email) string {
 func toResponse(a *db.Application, e *db.Email) *api.ApplicationResponse {
 	res := &api.ApplicationResponse{
 		ID: a.ID, JobID: a.JobID, EmailID: a.EmailID, Status: shownStatus(a, e), JobTitle: a.JobTitle, Company: a.Company, Via: a.Via,
-		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		FollowUpSentAt: a.FollowUpSentAt, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 	if e != nil {
 		res.Email = briefOf(e)

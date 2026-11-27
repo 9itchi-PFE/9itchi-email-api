@@ -90,6 +90,20 @@ func (m *memApps) SetStatus(_ context.Context, userID, id, status string) (*db.A
 	return nil, repositories.ErrNotFound
 }
 
+func (m *memApps) SetFollowUp(_ context.Context, userID, id, emailID string, at time.Time) (*db.Application, error) {
+	for i := range m.rows {
+		if m.rows[i].UserID == userID && m.rows[i].ID == id {
+			if m.rows[i].FollowUpEmailID != nil {
+				return nil, repositories.ErrConflict
+			}
+			m.rows[i].FollowUpEmailID, m.rows[i].FollowUpSentAt = &emailID, &at
+			c := m.rows[i]
+			return &c, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
 type appHarness struct {
 	*harness
 	apps *memApps

@@ -55,6 +55,11 @@ type EmailService interface {
 	UpdateEmail(ctx context.Context, userID, id string, req api.UpdateEmailRequest) (*db.Email, *models.ApiError)
 	// POST /recruiters/:id/draft: AI draft of a spontaneous application to a recruiter the student found
 	DraftForRecruiter(ctx context.Context, userID, id string, req api.RecruiterDraftRequest) (*api.DraftEmailResponse, *models.ApiError)
+	// DraftFollowUp writes the follow-up of an application (kept and counted like the other AI letters)
+	DraftFollowUp(ctx context.Context, userID, applicationID string, fresh bool, in core.DraftInput) (*api.DraftEmailResponse, *models.ApiError)
+	// SendFollowUp sends a follow-up from the student's Gmail: part of the subscription, counted in the month's
+	// emails, never with a CV
+	SendFollowUp(ctx context.Context, userID string, req api.SendEmailRequest) (*db.Email, *models.ApiError)
 }
 
 // EmailDeps are the collaborators of the email service (all mockable).

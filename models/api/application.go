@@ -17,6 +17,21 @@ type ApplyRequest struct {
 	ScheduledAt *time.Time `json:"scheduled_at"`
 }
 
+// FollowUpDraftRequest is the body of POST /applications/:id/follow-up/draft: the AI writes a follow-up of the
+// application. fresh asks for a new letter instead of the last one written.
+type FollowUpDraftRequest struct {
+	Language string `json:"language" binding:"omitempty,oneof=fr en ar"`
+	Tone     string `json:"tone" binding:"omitempty,oneof=formal friendly"`
+	Fresh    bool   `json:"fresh"`
+}
+
+// FollowUpRequest is the body of POST /applications/:id/follow-up: the follow-up the student read and sends, from
+// their Gmail, to the recipient of the first email (never another address).
+type FollowUpRequest struct {
+	Subject string `json:"subject" binding:"required,max=200"`
+	Body    string `json:"body" binding:"required,max=10000"`
+}
+
 // UpdateApplicationRequest is the body of PATCH /applications/:id: what the student tells us happened.
 // "replied": the company answered; "withdrawn": no longer interested; "closed": the company said no;
 // "sent": back to waiting.
@@ -40,13 +55,15 @@ type ApplicationResponse struct {
 	JobID   string  `json:"job_id"`
 	EmailID *string `json:"email_id"`
 	// Status is scheduled, sent, opened, replied, withdrawn, closed, or failed when the email could not leave.
-	Status    string      `json:"status"`
-	JobTitle  string      `json:"job_title"`
-	Company   string      `json:"company"`
-	Via       string      `json:"via"`
-	Email     *EmailBrief `json:"email"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	Status   string      `json:"status"`
+	JobTitle string      `json:"job_title"`
+	Company  string      `json:"company"`
+	Via      string      `json:"via"`
+	Email    *EmailBrief `json:"email"`
+	// FollowUpSentAt is when the follow-up (« relance ») left; null when none was sent.
+	FollowUpSentAt *time.Time `json:"follow_up_sent_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // ApplicationsResponse is the body of GET /applications.

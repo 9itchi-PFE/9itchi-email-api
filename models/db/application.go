@@ -13,9 +13,12 @@ type Application struct {
 	JobTitle string `db:"job_title" json:"job_title"`
 	Company  string `db:"company" json:"company"`
 	// Via is "gmail" (sent by 9itchi from the student's Gmail) or "self" (sent by the student elsewhere).
-	Via       string    `db:"via" json:"via"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	Via string `db:"via" json:"via"`
+	// FollowUpEmailID and FollowUpSentAt are the follow-up (« relance ») sent for this application, if any.
+	FollowUpEmailID *string    `db:"follow_up_email_id" json:"follow_up_email_id"`
+	FollowUpSentAt  *time.Time `db:"follow_up_sent_at" json:"follow_up_sent_at"`
+	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
 }
 
 // Application statuses and channels.

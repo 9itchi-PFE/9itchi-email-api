@@ -32,13 +32,17 @@ func (c *Client) Draft(ctx context.Context, bearer string, in core.DraftInput) (
 		Subject string `json:"subject"`
 		Body    string `json:"body"`
 	}
+	body := map[string]any{
+		"job_title": in.JobTitle, "company": in.Company, "job_description": in.JobDescription,
+		"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone, "goal": in.Goal,
+	}
+	if in.Kind != "" {
+		body["kind"], body["previous_email"], body["days_since"] = in.Kind, in.Previous, in.DaysSince
+	}
 	err := httpx.Do(ctx, c.HTTP, httpx.Request{
 		// The internal key is what ai-api checks now; the bearer is kept until every ai-api has the internal route.
 		Method: http.MethodPost, URL: httpx.URL(c.BaseURL, "/ai/emails/draft"), Bearer: bearer, APIKey: c.APIKey,
-		Body: map[string]string{
-			"job_title": in.JobTitle, "company": in.Company, "job_description": in.JobDescription,
-			"candidate_summary": in.CandidateSummary, "language": in.Language, "tone": in.Tone, "goal": in.Goal,
-		},
+		Body: body,
 	}, &out)
 	return out.Subject, out.Body, err
 }
