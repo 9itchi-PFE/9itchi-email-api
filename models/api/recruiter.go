@@ -2,27 +2,33 @@ package api
 
 import "time"
 
-// RecruiterSearchRequest is the body of POST /recruiters/search: at least one of a CV (its skills), keywords, a
-// company or a domain.
+// RecruiterSearchRequest is the body of POST /recruiters/search: a CV (its skills), what the student looks for in
+// their own words, the contract, optional keywords, where (country ISO 3166 alpha-2, default TN; city) and how many
+// people to find (1 to 10, default 5).
 type RecruiterSearchRequest struct {
 	ResumeID string   `json:"resume_id" binding:"omitempty,uuid"`
-	Keywords []string `json:"keywords" binding:"max=10,dive,max=60"`
-	Company  string   `json:"company" binding:"max=120"`
-	Domain   string   `json:"domain" binding:"max=253"`
-	Location string   `json:"location" binding:"max=120"`
+	Goal     string   `json:"goal" binding:"max=300"`
+	Contract string   `json:"contract" binding:"omitempty,oneof=pfe stage alternance cdi cdd"`
+	Keywords []string `json:"keywords" binding:"max=10,dive,max=40"`
+	Country  string   `json:"country" binding:"max=2"`
+	City     string   `json:"city" binding:"max=80"`
+	Contacts int      `json:"contacts"`
 }
 
 // RecruiterItem is one recruiter found for the student.
 type RecruiterItem struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Title       string    `json:"title"`
-	Company     string    `json:"company"`
-	Domain      string    `json:"domain"`
-	Email       string    `json:"email"`
-	LinkedInURL string    `json:"linkedin_url"`
-	Confidence  int       `json:"confidence"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Title           string    `json:"title"`
+	Company         string    `json:"company"`
+	Domain          string    `json:"domain"`
+	Email           string    `json:"email"`
+	LinkedInURL     string    `json:"linkedin_url"`
+	Confidence      int       `json:"confidence"`
+	Verified        bool      `json:"verified"`
+	CompanySummary  string    `json:"company_summary"`
+	MatchedKeywords []string  `json:"matched_keywords"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // RecruiterAllowance is the plan's daily limit of searches (Limit and Remaining nil: no limit), how many were made
@@ -34,14 +40,22 @@ type RecruiterAllowance struct {
 	ResetsAt  time.Time `json:"resets_at"`
 }
 
+// ProspectStats tells where the companies and people of a search came from: the shared pool, or found now.
+type ProspectStats struct {
+	CompaniesFromPool   int `json:"companies_from_pool"`
+	CompaniesDiscovered int `json:"companies_discovered"`
+	ContactsFromPool    int `json:"contacts_from_pool"`
+	ContactsFound       int `json:"contacts_found"`
+}
+
 // RecruiterSearchResponse is what a search found. Cached says the same search was already made today: it was given
-// back without asking the provider again nor counting it.
+// back without searching again nor counting it (its stats are then zero). The provider stays internal.
 type RecruiterSearchResponse struct {
 	SearchID  string             `json:"search_id"`
-	Provider  string             `json:"provider"`
 	Cached    bool               `json:"cached"`
 	Items     []RecruiterItem    `json:"items"`
 	Allowance RecruiterAllowance `json:"allowance"`
+	Stats     ProspectStats      `json:"stats"`
 }
 
 // RecruitersResponse is every recruiter found for the student, each person once (newest first).

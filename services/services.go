@@ -1,6 +1,8 @@
 package services
 
 import (
+	"slices"
+
 	"9itchi-email-api/core"
 	"9itchi-email-api/pkg/ai"
 	"9itchi-email-api/pkg/google"
@@ -9,6 +11,7 @@ import (
 	"9itchi-email-api/pkg/recruiters"
 	"9itchi-email-api/pkg/resume"
 	"9itchi-email-api/pkg/schedule"
+	"9itchi-email-api/pkg/statistics"
 	"9itchi-email-api/pkg/tracker"
 	"9itchi-email-api/repositories"
 	"9itchi-email-api/utils"
@@ -38,14 +41,24 @@ type Clients struct {
 	Google   *google.Client
 }
 
-// InitServices builds the services. It fails on an unknown recruiter provider.
+// InitServices builds the services. It fails on an unknown recruiter source.
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Services, error) {
-	finder, err := recruiters.New(config.RecruiterProvider, recruiters.Config{APIKey: config.RecruiterAPIKey, BaseURL: config.RecruiterBaseURL})
+	// The admin credit tracker: providers report what they spent, and a token an admin set wins over the env key.
+	credits := statistics.New(config.StatisticsAPIURL, config.InternalAPIKey)
+	rcfg := recruiters.Config{HunterAPIKey: config.HunterAPIKey, ApolloAPIKey: config.ApolloAPIKey}
+	if credits.Enabled() {
+		rcfg.Token = credits.Token
+	}
+	finders, err := recruiters.NewChain(config.RecruiterChain, rcfg)
 	if err != nil {
 		return nil, err
 	}
-	if finder.Name() == "fake" && config.Environment == "production" {
-		utils.Logger.Logger.Warnw("recruiter search uses the fake provider: its people are invented (.example domains)")
+	discoverers, err := recruiters.NewDiscovery(config.CompanyDiscovery, rcfg)
+	if err != nil {
+		return nil, err
+	}
+	if config.Environment == "production" && (slices.Contains(config.RecruiterChain, "fake") || slices.Contains(config.CompanyDiscovery, "fake")) {
+		utils.Logger.Logger.Warnw("recruiter search uses the fake source: its companies and people are invented (.example domains)")
 	}
 	clients := &Clients{
 		Ai:       ai.New(config.AiAPIURL, config.InternalAPIKey),
@@ -75,7 +88,9 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Match:       NewMatchService(matchDeps),
 		Score:       NewScoreService(matchDeps),
 		Recruiter: NewRecruiterService(RecruiterDeps{
-			Repo: repos.Recruiter, Finder: finder, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
+			Repo: repos.Recruiter, Pool: repos.Prospect, Offers: clients.Job, Finders: finders, Discoverers: discoverers,
+			Caps:    map[string]int{"hunter": config.HunterMonthlyCap, "apollo": config.ApolloMonthlyCap},
+			Credits: credits.Report, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
 		}),
 		Clients: clients,
 	}, nil

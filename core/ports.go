@@ -172,35 +172,89 @@ type Matcher interface {
 	Match(ctx context.Context, in MatchInput) (*MatchResult, error)
 }
 
-// RecruiterQuery is what a student looks for: recruiters of a company or a domain, or of the field of their skills
-// and keywords, near a location. Limit caps the number of results.
-type RecruiterQuery struct {
-	Skills   []string `json:"skills"`
-	Keywords []string `json:"keywords"`
-	Company  string   `json:"company"`
-	Domain   string   `json:"domain"`
-	Location string   `json:"location"`
-	Limit    int      `json:"limit"`
-}
-
-// Recruiter is one person who hires: name, title, company and how to reach them. Confidence (0 to 100) is how sure
-// the provider is of the address.
-type Recruiter struct {
-	Name        string
-	Title       string
-	Company     string
+// Company is a company that may hire the student, as a provider or the platform's offers know it. Domain is its
+// web host, lower case without "www." (empty when unknown). Country is ISO 3166 alpha-2 or empty.
+type Company struct {
 	Domain      string
-	Email       string
-	LinkedInURL string
-	Confidence  int
+	Name        string
+	Description string
+	Industry    string
+	SizeRange   string
+	Country     string
+	City        string
+	Keywords    []string
 }
 
-// RecruiterFinder is one provider of recruiter contacts, chosen by name in pkg/recruiters.
-// Contract: Find returns at most q.Limit people with an HR, talent-acquisition or hiring-manager title, Confidence
-// between 0 and 100, Email possibly empty; the same query gives the same answer; a failure wraps ErrPeerUnavailable.
-type RecruiterFinder interface {
+// CompanyQuery is what a student looks for, as search terms (lower case, no accents), in a country (and city).
+type CompanyQuery struct {
+	Terms   []string
+	Country string
+	City    string
+	Limit   int
+}
+
+// CompanyDiscoverer finds companies that match a query, chosen by name in pkg/recruiters (env COMPANY_DISCOVERY).
+// Contract: Ready is false when its key is missing (then it is skipped, never an error); Discover returns at most
+// q.Limit companies, each with a Domain; a failure is an error (the search goes on without it).
+type CompanyDiscoverer interface {
 	Name() string
-	Find(ctx context.Context, q RecruiterQuery) ([]Recruiter, error)
+	Ready() bool
+	Discover(ctx context.Context, q CompanyQuery) ([]Company, error)
+}
+
+// ContactQuery asks for the people who hire at a company: by Domain, else by Company name (only finders that can
+// resolve a name answer then). MaxCredits is how many paid credits the finder may still spend this month.
+type ContactQuery struct {
+	Domain     string
+	Company    string
+	MaxCredits int
+}
+
+// Contact is one person (or recruiting mailbox) at a company. Department is hr, management, executive,
+// engineering or other; Verification valid, accept_all, unknown, invalid or empty (not checked).
+type Contact struct {
+	Email        string
+	FirstName    string
+	LastName     string
+	Title        string
+	Department   string
+	LinkedInURL  string
+	Confidence   int
+	Verification string
+}
+
+// ContactLookup is what one finder returned: the people, the credits it spent and, when asked by name, the
+// domain and name of the company it resolved.
+type ContactLookup struct {
+	Contacts []Contact
+	Credits  int
+	Domain   string
+	Company  string
+}
+
+// ContactFinder is one source of company contacts, chosen by name in pkg/recruiters (env RECRUITER_CHAIN).
+// Contract: Ready is false when its key is missing (skipped, never an error); Find never spends more than
+// q.MaxCredits; a query it cannot answer (no domain) gives an empty lookup, not an error; Confidence is 0 to 100.
+type ContactFinder interface {
+	Name() string
+	Ready() bool
+	Find(ctx context.Context, q ContactQuery) (*ContactLookup, error)
+}
+
+// OfferCompany is a company that published still-open offers matching the search terms on the platform.
+type OfferCompany struct {
+	Company      string
+	Domain       string
+	Description  string
+	City         string
+	Country      string
+	Titles       []string
+	MatchedTerms []string
+}
+
+// OfferCompanySource calls 9itchi-job-api for the companies of the open offers matching search terms.
+type OfferCompanySource interface {
+	OfferCompanies(ctx context.Context, terms []string, country string, limit int) ([]OfferCompany, error)
 }
 
 // SkillSource calls 9itchi-resume-api for the skills listed on a CV of the user.

@@ -11,63 +11,67 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPicksTheProviderByName(t *testing.T) {
-	f, err := New("fake", Config{})
+func TestNewChainPicksTheSourcesByName(t *testing.T) {
+	chain, err := NewChain([]string{"website", "hunter", "apollo", "fake"}, Config{})
 	require.NoError(t, err)
-	assert.Equal(t, "fake", f.Name())
+	require.Len(t, chain, 4)
+	assert.Equal(t, "website", chain[0].Name())
+	assert.True(t, chain[0].Ready(), "the website needs no key")
+	assert.False(t, chain[1].Ready(), "hunter without its key is skipped")
+	assert.False(t, chain[2].Ready(), "apollo without its key is skipped")
 
-	_, err = New("nobody", Config{APIKey: "k"})
+	_, err = NewChain([]string{"nobody"}, Config{})
 	assert.Error(t, err)
-}
 
-func TestFakeHonorsTheFinderContract(t *testing.T) {
-	f, _ := NewFake(Config{})
-	q := core.RecruiterQuery{Keywords: []string{"React", "Node"}, Location: "Tunis", Limit: 20}
-	got, err := f.Find(context.Background(), q)
+	disc, err := NewDiscovery([]string{"hunter", "fake"}, Config{})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(got), 8)
-	require.LessOrEqual(t, len(got), 12)
-
-	withoutEmail := 0
-	names := map[string]bool{}
-	for _, r := range got {
-		assert.NotEmpty(t, r.Name)
-		assert.False(t, names[r.Name], "no one twice")
-		names[r.Name] = true
-		assert.NotEmpty(t, r.Title)
-		assert.True(t, strings.HasSuffix(r.Domain, ".example"), "never a real domain: %s", r.Domain)
-		assert.True(t, strings.HasPrefix(r.LinkedInURL, "https://www.linkedin.com/in/"))
-		assert.GreaterOrEqual(t, r.Confidence, 0)
-		assert.LessOrEqual(t, r.Confidence, 100)
-		if r.Email == "" {
-			withoutEmail++
-			continue
-		}
-		assert.True(t, strings.HasSuffix(r.Email, "@"+r.Domain), r.Email)
-	}
-	assert.Less(t, withoutEmail, len(got), "most have an address")
-
-	again, _ := f.Find(context.Background(), core.RecruiterQuery{Keywords: []string{" node", "react "}, Location: "TUNIS", Limit: 20})
-	assert.Equal(t, got, again, "the same search, however typed, gives the same people")
-
-	other, _ := f.Find(context.Background(), core.RecruiterQuery{Keywords: []string{"Java"}, Limit: 20})
-	assert.NotEqual(t, got, other)
+	require.Len(t, disc, 2)
+	_, err = NewDiscovery([]string{"apollo"}, Config{})
+	assert.Error(t, err, "apollo company search is not a discoverer")
 }
 
-func TestFakeCompanyAndLimit(t *testing.T) {
-	f, _ := NewFake(Config{})
-	got, _ := f.Find(context.Background(), core.RecruiterQuery{Company: "Vermeg", Domain: "vermeg.com", Limit: 3})
-	require.Len(t, got, 3)
-	for _, r := range got {
-		assert.Equal(t, "Vermeg", r.Company)
-		assert.Equal(t, "vermeg.example", r.Domain, "the company's real domain is never used")
+func TestTokenWinsOverTheEnvKey(t *testing.T) {
+	h := NewHunter(Config{HunterAPIKey: "env", Token: func(p string) string {
+		if p == "hunter" {
+			return "admin"
+		}
+		return ""
+	}})
+	assert.Equal(t, "admin", h.key())
+	a := NewApollo(Config{ApolloAPIKey: "env", Token: func(string) string { return "" }})
+	assert.Equal(t, "env", a.key(), "no admin token: the env key")
+	assert.True(t, NewHunter(Config{Token: func(string) string { return "admin" }}).Ready())
+}
+
+func TestFakeHonorsTheContracts(t *testing.T) {
+	f := Fake{}
+	got, err := f.Find(context.Background(), core.ContactQuery{Domain: "www.Vermeg.com"})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(got.Contacts), 2)
+	assert.Equal(t, "vermeg.example", got.Domain, "the company's real domain is never used")
+	for _, c := range got.Contacts {
+		assert.True(t, strings.HasSuffix(c.Email, "@vermeg.example"), c.Email)
+		assert.NotEmpty(t, c.FirstName)
+		assert.GreaterOrEqual(t, c.Confidence, 0)
+		assert.LessOrEqual(t, c.Confidence, 100)
 	}
+	again, _ := f.Find(context.Background(), core.ContactQuery{Domain: "vermeg.com"})
+	assert.Equal(t, got, again, "the same company gives the same people")
 
-	got, _ = f.Find(context.Background(), core.RecruiterQuery{Domain: "www.acme.tn", Limit: 20})
-	require.NotEmpty(t, got)
-	assert.Equal(t, "Acme", got[0].Company)
-	assert.Equal(t, "acme.example", got[0].Domain)
+	byName, _ := f.Find(context.Background(), core.ContactQuery{Company: "Carthage Labs"})
+	assert.Equal(t, "carthage-labs.example", byName.Domain)
+	none, _ := f.Find(context.Background(), core.ContactQuery{})
+	assert.Empty(t, none.Contacts)
 
-	got, _ = f.Find(context.Background(), core.RecruiterQuery{Limit: 20})
-	assert.NotEmpty(t, got, "a search with nothing to go on still answers")
+	companies, err := f.Discover(context.Background(), core.CompanyQuery{Terms: []string{"data", "python"}, Country: "TN", Limit: 4})
+	require.NoError(t, err)
+	require.NotEmpty(t, companies)
+	assert.LessOrEqual(t, len(companies), 4)
+	for _, c := range companies {
+		assert.True(t, strings.HasSuffix(c.Domain, ".example"), c.Domain)
+		assert.Equal(t, "TN", c.Country)
+		assert.Contains(t, c.Description, "data")
+	}
+	same, _ := f.Discover(context.Background(), core.CompanyQuery{Terms: []string{"data", "python"}, Country: "TN", Limit: 4})
+	assert.Equal(t, companies, same)
 }
