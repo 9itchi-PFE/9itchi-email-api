@@ -39,7 +39,9 @@ func NewRecruiterRepository(store *Store) RecruiterRepository {
 const (
 	searchColumns    = `id, user_id, query, query_hash, provider, result_count, created_at`
 	recruiterColumns = `id, user_id, search_id, dedupe_key, name, title, company, domain, email, linkedin_url, confidence, provider, created_at,
-		COALESCE(contact_id::text, '') AS contact_id, company_summary, matched_keywords, verified`
+		COALESCE(contact_id::text, '') AS contact_id, company_summary, matched_keywords, verified,
+		COALESCE((SELECT co.logo_url FROM contacts ct JOIN companies co ON co.id = ct.company_id
+			WHERE ct.id = recruiters.contact_id), '') AS logo_url`
 )
 
 func scanSearch(r rowScanner) (*db.RecruiterSearch, error) {
@@ -53,7 +55,8 @@ func scanSearch(r rowScanner) (*db.RecruiterSearch, error) {
 func scanRecruiter(r rowScanner) (*db.Recruiter, error) {
 	var x db.Recruiter
 	err := r.Scan(&x.ID, &x.UserID, &x.SearchID, &x.DedupeKey, &x.Name, &x.Title, &x.Company, &x.Domain, &x.Email,
-		&x.LinkedInURL, &x.Confidence, &x.Provider, &x.CreatedAt, &x.ContactID, &x.CompanySummary, &x.MatchedKeywords, &x.Verified)
+		&x.LinkedInURL, &x.Confidence, &x.Provider, &x.CreatedAt, &x.ContactID, &x.CompanySummary, &x.MatchedKeywords, &x.Verified,
+		&x.LogoURL)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -129,7 +132,7 @@ func (r *recruiterRepository) ListBySearch(ctx context.Context, userID, searchID
 }
 
 func (r *recruiterRepository) List(ctx context.Context, userID string, limit int) ([]db.Recruiter, error) {
-	return r.list(ctx, `SELECT `+recruiterColumns+` FROM (
+	return r.list(ctx, `SELECT * FROM (
 			SELECT DISTINCT ON (dedupe_key) `+recruiterColumns+` FROM recruiters WHERE user_id = $1
 			ORDER BY dedupe_key, created_at DESC, id
 		) r ORDER BY created_at DESC, confidence DESC, name LIMIT $2`, userID, limit)

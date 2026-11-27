@@ -16,6 +16,7 @@ type Company struct {
 	Keywords    []string
 	SearchText  string
 	Source      string
+	LogoURL     string // "" = unknown; a save without one keeps the stored logo
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
