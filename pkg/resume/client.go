@@ -47,14 +47,39 @@ type resumeView struct {
 		} `json:"contact"`
 		Summary    string   `json:"summary"`
 		Skills     []string `json:"skills"`
+		Languages  []string `json:"languages"`
 		Experience []struct {
-			Company string `json:"company"`
-			Title   string `json:"title"`
+			Company     string   `json:"company"`
+			Title       string   `json:"title"`
+			Kind        string   `json:"kind"`
+			Hidden      bool     `json:"hidden"`
+			Start       string   `json:"start"`
+			End         string   `json:"end"`
+			Description []string `json:"description"`
 		} `json:"experience"`
 		Education []struct {
 			School string `json:"school"`
 			Degree string `json:"degree"`
+			Hidden bool   `json:"hidden"`
+			Start  string `json:"start"`
+			End    string `json:"end"`
 		} `json:"education"`
+		Projects []struct {
+			Name        string   `json:"name"`
+			Tech        string   `json:"tech"`
+			Hidden      bool     `json:"hidden"`
+			Description []string `json:"description"`
+		} `json:"projects"`
+		Certifications []struct {
+			Name   string `json:"name"`
+			Issuer string `json:"issuer"`
+			Hidden bool   `json:"hidden"`
+			Year   string `json:"year"`
+		} `json:"certifications"`
+		Extra []struct {
+			Title string   `json:"title"`
+			Items []string `json:"items"`
+		} `json:"extra"`
 	} `json:"content"`
 }
 
@@ -79,25 +104,99 @@ func (c *Client) Skills(ctx context.Context, bearer, id string) ([]string, error
 	return out.Content.Skills, nil
 }
 
-// Summary calls GET /resumes/:id on behalf of the user and flattens the CV to a few lines of text.
+// maxSummaryBytes keeps the CV text under the 8000 bytes ai-api accepts for candidate_summary.
+const maxSummaryBytes = 7500
+
+// Summary calls GET /resumes/:id on behalf of the user and flattens the CV to text for the AI.
 func (c *Client) Summary(ctx context.Context, bearer, id string) (string, error) {
 	out, err := c.get(ctx, bearer, id)
 	if err != nil {
 		return "", err
 	}
+	return summaryText(out), nil
+}
+
+// summaryText is the CV as text: identity, education with dates, experience with its bullets (where the figures
+// are), projects, certifications, languages, other sections and skills. Hidden entries stay out. The text is cut
+// on a line end at maxSummaryBytes.
+func summaryText(out *resumeView) string {
 	var b strings.Builder
 	k := out.Content
 	fmt.Fprintf(&b, "Name: %s\nHeadline: %s\nSummary: %s\n", k.Contact.Name, k.Contact.Headline, k.Summary)
 	for _, e := range k.Education {
-		fmt.Fprintf(&b, "Education: %s, %s\n", e.Degree, e.School)
+		if !e.Hidden {
+			fmt.Fprintf(&b, "Education: %s, %s%s\n", e.Degree, e.School, period(e.Start, e.End))
+		}
 	}
 	for _, e := range k.Experience {
-		fmt.Fprintf(&b, "Experience: %s at %s\n", e.Title, e.Company)
+		if e.Hidden {
+			continue
+		}
+		kind := ""
+		if e.Kind != "" {
+			kind = " (" + e.Kind + ")"
+		}
+		fmt.Fprintf(&b, "Experience: %s%s at %s%s\n", e.Title, kind, e.Company, period(e.Start, e.End))
+		writeBullets(&b, e.Description)
+	}
+	for _, p := range k.Projects {
+		if p.Hidden {
+			continue
+		}
+		tech := ""
+		if p.Tech != "" {
+			tech = " (" + p.Tech + ")"
+		}
+		fmt.Fprintf(&b, "Project: %s%s\n", p.Name, tech)
+		writeBullets(&b, p.Description)
+	}
+	for _, c := range k.Certifications {
+		if !c.Hidden {
+			fmt.Fprintf(&b, "Certification: %s\n", strings.Join(nonEmpty(c.Name, c.Issuer, c.Year), ", "))
+		}
+	}
+	if len(k.Languages) > 0 {
+		fmt.Fprintf(&b, "Languages: %s\n", strings.Join(k.Languages, ", "))
+	}
+	for _, x := range k.Extra {
+		if len(x.Items) > 0 {
+			fmt.Fprintf(&b, "%s: %s\n", x.Title, strings.Join(x.Items, "; "))
+		}
 	}
 	if len(k.Skills) > 0 {
 		fmt.Fprintf(&b, "Skills: %s\n", strings.Join(k.Skills, ", "))
 	}
-	return b.String(), nil
+	text := b.String()
+	if len(text) > maxSummaryBytes {
+		text = text[:strings.LastIndexByte(text[:maxSummaryBytes], '\n')+1]
+	}
+	return text
+}
+
+func writeBullets(b *strings.Builder, lines []string) {
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); l != "" {
+			fmt.Fprintf(b, "  - %s\n", l)
+		}
+	}
+}
+
+// period is " (start - end)", " (start)" or "".
+func period(start, end string) string {
+	if p := strings.Join(nonEmpty(start, end), " - "); p != "" {
+		return " (" + p + ")"
+	}
+	return ""
+}
+
+func nonEmpty(in ...string) []string {
+	var out []string
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // PDF calls GET /internal/resumes/:id/pdf: the CV as it is now. It returns nil when the CV does not exist.

@@ -157,7 +157,7 @@ func TestDraftForRecruiter(t *testing.T) {
 	h, svc, _ := linkHarness(map[string]int{core.QuotaAIDrafts: 1})
 	recs := &memRecruiters{at: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) }}
 	svc.Recruiters = recs
-	_, _, _ = recs.SaveSearch(context.Background(), &db.RecruiterSearch{UserID: uid, Provider: "chain", Query: []byte(`{"contract":"pfe"}`)}, []db.Recruiter{
+	_, _, _ = recs.SaveSearch(context.Background(), &db.RecruiterSearch{UserID: uid, Provider: "chain", Query: []byte(`{"contract":"pfe","keywords":["C++","paiement"]}`)}, []db.Recruiter{
 		{Name: "Sarra Gharbi", Title: "Responsable RH", Company: "Acme", Email: "sarra@acme.example", DedupeKey: "sarra@acme.example",
 			CompanySummary: "Acme builds data platforms."},
 	})
@@ -185,6 +185,7 @@ func TestDraftForRecruiter(t *testing.T) {
 	assert.NotContains(t, h.draft.in.JobDescription, "Sarra", "the recruiter's name never reaches the AI")
 	assert.NotContains(t, h.draft.in.JobDescription, "sarra@")
 	assert.Equal(t, "Ines, ENIS", h.draft.in.CandidateSummary)
+	assert.Equal(t, []string{"C++", "paiement"}, h.draft.in.Keywords, "the search keywords reach the AI")
 	saved := svc.Drafts.(*memDrafts).rows[0]
 	require.NotNil(t, saved.SourceURL)
 	assert.Equal(t, "recruiter:"+id, *saved.SourceURL)
