@@ -188,3 +188,20 @@ func TestEmailRepositoryLetterFields(t *testing.T) {
 	_, err = repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft, LetterLanguage: &bad})
 	assert.Error(t, err, "language checked")
 }
+
+// tracker-api ids are 43-char base64url strings, not uuids: they must be stored as they are.
+func TestEmailRepositorySetTracking(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewEmailRepository(store)
+	const user = "00000000-0000-0000-0000-0000000000a1"
+	e, err := repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft})
+	require.NoError(t, err)
+	require.NotEmpty(t, e.TrackingID)
+
+	const id = "V4UTMevdSoV4u0xRAG3qiBnavdpVV5QGgSfNZpD4Zu0"
+	require.NoError(t, repo.SetTracking(ctx, e.ID, id))
+	got, err := repo.Get(ctx, user, e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, id, got.TrackingID)
+}
