@@ -127,7 +127,13 @@ func (s *emailService) DraftFromLink(ctx context.Context, userID string, req api
 		}, nil
 	}
 
-	offer, err := s.Offers.ReadOffer(ctx, link, strings.TrimSpace(req.OfferText))
+	pasted := strings.TrimSpace(req.OfferText)
+	offer, err := s.Offers.ReadOffer(ctx, link, pasted)
+	if errors.Is(err, core.ErrPeerUnprocessable) && pasted != "" {
+		// The student gave the offer's text (pasted or sent by the « Send to 9itchi » button): when job-api finds no
+		// title in it, the letter is written from the text itself instead of asking for it again.
+		offer, err = &core.OfferText{Description: pasted}, nil
+	}
 	if errors.Is(err, core.ErrPeerUnprocessable) {
 		return nil, apiError(http.StatusUnprocessableEntity, "this offer cannot be read: paste its text")
 	}

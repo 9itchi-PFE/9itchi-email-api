@@ -143,6 +143,14 @@ func TestDraftFromLinkUnreadable(t *testing.T) {
 	assert.LessOrEqual(t, len(h.draft.in.JobDescription), 20000)
 	assert.True(t, strings.HasSuffix(h.draft.in.JobDescription, "é"), "cut on a character boundary")
 
+	// job-api finds no title in the pasted text: the letter is still written from that text.
+	offers.err = fmt.Errorf("%w: status 422", core.ErrPeerUnprocessable)
+	out, apiErr = svc.DraftFromLink(context.Background(), uid, api.DraftFromLinkRequest{URL: "https://www.linkedin.com/jobs/view/2", OfferText: "Développeur React, Tunis"})
+	require.Nil(t, apiErr)
+	assert.Equal(t, "Stage PFE", h.draft.in.JobTitle)
+	assert.Equal(t, "Développeur React, Tunis", h.draft.in.JobDescription)
+	assert.Equal(t, "linkedin", out.Offer.Source)
+
 	offers.err = core.ErrPeerUnavailable
 	_, apiErr = svc.DraftFromLink(context.Background(), uid, api.DraftFromLinkRequest{URL: "https://jobs.example/9"})
 	require.NotNil(t, apiErr)
