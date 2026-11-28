@@ -35,6 +35,7 @@ const (
 
 type memEmails struct {
 	builtErr error
+	trackErr error
 	mu       sync.Mutex
 	rows     map[string]*db.Email
 	n        int
@@ -95,6 +96,9 @@ func (m *memEmails) Claim(_ context.Context, id string) (*db.Email, error) {
 	return &c, nil
 }
 func (m *memEmails) SetTracking(_ context.Context, id, t string) error {
+	if m.trackErr != nil {
+		return m.trackErr
+	}
 	m.rows[id].TrackingID = t
 	return nil
 }
@@ -469,6 +473,17 @@ func TestSendEmail(t *testing.T) {
 	assert.Contains(t, m.HTML, "&lt;b&gt;<br>Bonjour")
 	assert.Contains(t, m.HTML, "http://tracker/t/track-1")
 	assert.Equal(t, db.EmailSent, h.repo.rows[e.ID].Status)
+}
+
+// A tracking id that cannot be stored here still sends the pixel: the tracker counts the opens on its own.
+func TestSendEmailTrackingNotStored(t *testing.T) {
+	h := newHarness(nil, unlimited)
+	h.repo.trackErr = errors.New("invalid input syntax for type uuid")
+	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
+	require.Nil(t, apiErr)
+	assert.Equal(t, db.EmailSent, e.Status)
+	require.Len(t, h.mailer.sent, 1)
+	assert.Contains(t, h.mailer.sent[0].HTML, "http://tracker/t/track-1")
 }
 
 func TestSendEmailGmailNotConnected(t *testing.T) {

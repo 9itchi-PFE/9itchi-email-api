@@ -522,9 +522,12 @@ func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (
 	}
 	pixel := ""
 	if trackingID, path, err := s.Tracker.Register(ctx, e.ID, e.UserID); err == nil && trackingID != "" {
+		// The pixel goes in even when the id cannot be stored here: the tracker counts the opens on its own.
+		pixel = strings.TrimRight(s.Config.TrackerPublicURL, "/") + path
 		if err := s.Repo.SetTracking(ctx, e.ID, trackingID); err == nil {
 			e.TrackingID = trackingID
-			pixel = strings.TrimRight(s.Config.TrackerPublicURL, "/") + path
+		} else {
+			utils.Logger.Logger.Warnw("email: tracking id not stored", "email_id", e.ID, "error", err)
 		}
 	} else if err != nil {
 		utils.Logger.Logger.Warnw("email: tracking unavailable, sending without pixel", "error", err)
