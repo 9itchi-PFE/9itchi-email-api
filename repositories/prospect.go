@@ -16,6 +16,8 @@ type ProspectRepository interface {
 	SearchCompanies(ctx context.Context, tsQuery, country string, limit int) ([]db.Company, error)
 	// CompanyByDomain returns the company of a domain (ErrNotFound when none).
 	CompanyByDomain(ctx context.Context, domain string) (*db.Company, error)
+	// CompanyByName returns the most recently updated company with this name, any case (ErrNotFound when none).
+	CompanyByName(ctx context.Context, name string) (*db.Company, error)
 	// SaveCompany inserts the company, or replaces the one with the same domain, and returns it as stored.
 	SaveCompany(ctx context.Context, c *db.Company) (*db.Company, error)
 	// CompanyContacts returns the people of a company still in the pool (not opted out) checked or updated since
@@ -94,6 +96,13 @@ func (r *prospectRepository) CompanyByDomain(ctx context.Context, domain string)
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanCompany(r.store.Conn(ctx).QueryRow(ctx, `SELECT `+companyColumns+` FROM companies WHERE domain = $1`, domain))
+}
+
+func (r *prospectRepository) CompanyByName(ctx context.Context, name string) (*db.Company, error) {
+	ctx, cancel := QueryTimeout(ctx)
+	defer cancel()
+	return scanCompany(r.store.Conn(ctx).QueryRow(ctx, `SELECT `+companyColumns+` FROM companies WHERE lower(name) = lower($1)
+		ORDER BY updated_at DESC LIMIT 1`, name))
 }
 
 func (r *prospectRepository) SaveCompany(ctx context.Context, c *db.Company) (*db.Company, error) {

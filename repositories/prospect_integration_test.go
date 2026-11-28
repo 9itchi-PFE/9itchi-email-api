@@ -34,6 +34,11 @@ func TestProspectRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, acme.ID, again.ID, "same domain, same company")
 	assert.Equal(t, "offer", again.Source, "the first source stays")
+	byName, err := repo.CompanyByName(ctx, "ACME sa")
+	require.NoError(t, err)
+	assert.Equal(t, acme.ID, byName.ID, "a name matches in any case")
+	_, err = repo.CompanyByName(ctx, "Gamma")
+	assert.ErrorIs(t, err, ErrNotFound)
 	assert.Equal(t, "Acme SA", again.Name)
 	assert.Empty(t, again.LogoURL)
 	logo, err := repo.SaveCompany(ctx, &db.Company{Domain: "acme.tn", Name: "Acme SA", Description: "Data et Python", Country: "TN",
