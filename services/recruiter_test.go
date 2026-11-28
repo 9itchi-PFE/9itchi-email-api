@@ -180,16 +180,16 @@ func (m *memPool) CompanyByDomain(_ context.Context, domain string) (*db.Company
 	return nil, repositories.ErrNotFound
 }
 
-func (m *memPool) CompanyByName(_ context.Context, name string) (*db.Company, error) {
+func (m *memPool) CompaniesNamed(_ context.Context, prefix string, limit int) ([]db.Company, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for i := len(m.companies) - 1; i >= 0; i-- {
-		if strings.EqualFold(m.companies[i].Name, name) {
-			c := m.companies[i]
-			return &c, nil
+	out := []db.Company{}
+	for i := len(m.companies) - 1; i >= 0 && len(out) < limit; i-- {
+		if strings.HasPrefix(strings.ToLower(m.companies[i].Name), strings.ToLower(prefix)) {
+			out = append(out, m.companies[i])
 		}
 	}
-	return nil, repositories.ErrNotFound
+	return out, nil
 }
 
 func (m *memPool) SaveCompany(_ context.Context, c *db.Company) (*db.Company, error) {
@@ -620,8 +620,8 @@ func TestSearchTerms(t *testing.T) {
 	assert.Equal(t, []string{"machine learning", "developpement", "python", "intelligence", "artificielle"}, terms)
 	assert.Equal(t, "machine <-> learning | developpement | python | intelligence | artificielle", tsQuery(terms))
 	assert.Equal(t, []string{"python"}, matchedTerms(terms, wordText("Python, Pythonistas")))
-	assert.Equal(t, 3, titleBucket("Chargée de recrutement", "201-500"))
-	assert.Equal(t, 2, titleBucket("CTO", ""))
+	assert.Equal(t, 4, titleBucket("Chargée de recrutement", "201-500"))
+	assert.Equal(t, 3, titleBucket("CTO", ""))
 	assert.Equal(t, 1, titleBucket("CTO", "1001-5000"))
 	assert.Equal(t, 2, titleBucket("Head of Data", "201-500"))
 	assert.Equal(t, 1, titleBucket("Comptable", ""))

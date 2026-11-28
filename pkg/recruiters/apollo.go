@@ -43,9 +43,9 @@ func NewApollo(cfg Config) *Apollo { return &Apollo{cfg: cfg} }
 
 func (a *Apollo) Name() string { return "apollo" }
 
-func (a *Apollo) Ready() bool { return a.key() != "" }
+func (a *Apollo) Ready() bool { return len(a.keys()) > 0 }
 
-func (a *Apollo) key() string { return a.cfg.key("apollo", a.cfg.ApolloAPIKey) }
+func (a *Apollo) keys() []string { return a.cfg.keys("apollo", a.cfg.ApolloAPIKey) }
 
 func (a *Apollo) base() string {
 	if a.cfg.ApolloURL != "" {
@@ -128,14 +128,15 @@ func (e *apolloCharged) Error() string { return fmt.Sprintf("apollo status %d", 
 func (e *apolloCharged) Unwrap() error { return core.ErrPeerUnavailable }
 
 func (a *Apollo) post(ctx context.Context, path string, params url.Values, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base()+path+"?"+params.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("x-api-key", a.key())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cache-Control", "no-cache")
-	resp, err := a.cfg.client().Do(req)
+	resp, err := a.cfg.send("apollo", a.keys(), func(key string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base()+path+"?"+params.Encode(), nil)
+		if err == nil {
+			req.Header.Set("x-api-key", key)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Cache-Control", "no-cache")
+		}
+		return req, err
+	})
 	if err != nil {
 		return fmt.Errorf("%w: apollo unreachable", core.ErrPeerUnavailable)
 	}

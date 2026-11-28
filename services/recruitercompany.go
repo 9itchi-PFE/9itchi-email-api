@@ -28,6 +28,44 @@ type companyQuery struct {
 	Contacts int    `json:"contacts"`
 }
 
+// companyNamed is the newest pool company whose name is this one, ignoring case, accents, punctuation, spaces and
+// legal endings ("Datanomix" is "DATANOMIX, Inc."); nil when none.
+func (s *recruiterService) companyNamed(ctx context.Context, name string) (*db.Company, error) {
+	key := companyKey(name)
+	first := strings.Fields(strings.ToLower(name))
+	if key == "" || len(first) == 0 {
+		return nil, nil
+	}
+	rows, err := s.Pool.CompaniesNamed(ctx, strings.TrimRight(first[0], ",.;:"), 20)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range rows {
+		if companyKey(c.Name) == key {
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+// legalForms are the endings a company name may carry or not: matching ignores them.
+var legalForms = map[string]bool{
+	"inc": true, "incorporated": true, "llc": true, "llp": true, "ltd": true, "limited": true, "corp": true,
+	"corporation": true, "co": true, "company": true, "plc": true, "gmbh": true, "ag": true, "bv": true, "nv": true,
+	"sa": true, "sarl": true, "suarl": true, "sas": true, "sasu": true, "spa": true, "srl": true, "group": true,
+	"groupe": true, "holding": true,
+}
+
+// companyKey is a company name folded for matching: lower case, no accents, letters and digits only, legal endings
+// out, words glued ("Data Nomix SARL" and "datanomix" have the same key).
+func companyKey(name string) string {
+	ws := words(fold(name))
+	for len(ws) > 1 && legalForms[ws[len(ws)-1]] {
+		ws = ws[:len(ws)-1]
+	}
+	return strings.Join(ws, "")
+}
+
 // AtCompany finds the right people at one company: the pool first (by domain, else by name), else the finders chain.
 // The people found join the student's recruiters and the pool. Nobody found is a 404 and is not counted.
 func (s *recruiterService) AtCompany(ctx context.Context, userID string, req api.CompanyRecruiterRequest) (*api.RecruiterSearchResponse, *models.ApiError) {
@@ -74,11 +112,11 @@ func (s *recruiterService) AtCompany(ctx context.Context, userID string, req api
 		} else {
 			stats.CompaniesFromPool++
 		}
-	} else if pooled, err := s.Pool.CompanyByName(ctx, name); err == nil {
+	} else if pooled, err := s.companyNamed(ctx, name); err != nil {
+		return nil, repoError(err, "company not found")
+	} else if pooled != nil {
 		cand.company = *pooled
 		stats.CompaniesFromPool++
-	} else if !errors.Is(err, repositories.ErrNotFound) {
-		return nil, repoError(err, "company not found")
 	}
 
 	pctx, cancel := context.WithTimeout(ctx, prospectTimeout)

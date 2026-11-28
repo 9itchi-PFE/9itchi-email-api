@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"9itchi-email-api/models/db"
@@ -16,8 +17,8 @@ type ProspectRepository interface {
 	SearchCompanies(ctx context.Context, tsQuery, country string, limit int) ([]db.Company, error)
 	// CompanyByDomain returns the company of a domain (ErrNotFound when none).
 	CompanyByDomain(ctx context.Context, domain string) (*db.Company, error)
-	// CompanyByName returns the most recently updated company with this name, any case (ErrNotFound when none).
-	CompanyByName(ctx context.Context, name string) (*db.Company, error)
+	// CompaniesNamed returns the companies whose name starts with the prefix, any case, most recently updated first.
+	CompaniesNamed(ctx context.Context, prefix string, limit int) ([]db.Company, error)
 	// SaveCompany inserts the company, or replaces the one with the same domain, and returns it as stored.
 	SaveCompany(ctx context.Context, c *db.Company) (*db.Company, error)
 	// CompanyContacts returns the people of a company still in the pool (not opted out) checked or updated since
@@ -98,11 +99,27 @@ func (r *prospectRepository) CompanyByDomain(ctx context.Context, domain string)
 	return scanCompany(r.store.Conn(ctx).QueryRow(ctx, `SELECT `+companyColumns+` FROM companies WHERE domain = $1`, domain))
 }
 
-func (r *prospectRepository) CompanyByName(ctx context.Context, name string) (*db.Company, error) {
+// likeEscaper escapes the LIKE wildcards of a typed prefix.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+
+func (r *prospectRepository) CompaniesNamed(ctx context.Context, prefix string, limit int) ([]db.Company, error) {
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
-	return scanCompany(r.store.Conn(ctx).QueryRow(ctx, `SELECT `+companyColumns+` FROM companies WHERE lower(name) = lower($1)
-		ORDER BY updated_at DESC LIMIT 1`, name))
+	rows, err := r.store.Conn(ctx).Query(ctx, `SELECT `+companyColumns+` FROM companies WHERE lower(name) LIKE $1
+		ORDER BY updated_at DESC LIMIT $2`, likeEscaper.Replace(strings.ToLower(prefix))+"%", limit)
+	if err != nil {
+		return nil, MapError(err)
+	}
+	defer rows.Close()
+	out := []db.Company{}
+	for rows.Next() {
+		c, err := scanCompany(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, MapError(rows.Err())
 }
 
 func (r *prospectRepository) SaveCompany(ctx context.Context, c *db.Company) (*db.Company, error) {

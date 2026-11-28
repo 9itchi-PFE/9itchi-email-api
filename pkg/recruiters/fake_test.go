@@ -37,9 +37,9 @@ func TestTokenWinsOverTheEnvKey(t *testing.T) {
 		}
 		return ""
 	}})
-	assert.Equal(t, "admin", h.key())
+	assert.Equal(t, []string{"admin"}, h.keys())
 	a := NewApollo(Config{ApolloAPIKey: "env", Token: func(string) string { return "" }})
-	assert.Equal(t, "env", a.key(), "no admin token: the env key")
+	assert.Equal(t, []string{"env"}, a.keys(), "no admin token: the env key")
 	assert.True(t, NewHunter(Config{Token: func(string) string { return "admin" }}).Ready())
 }
 
