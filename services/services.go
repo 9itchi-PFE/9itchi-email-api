@@ -78,7 +78,11 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Resumes: clients.Resume, Tracker: clients.Tracker, Scheduler: clients.Schedule, Quotas: clients.Payments,
 		Events: events, Config: config, Drafts: repos.Draft, Offers: clients.Job, Recruiters: repos.Recruiter,
 	})
-	caps := map[string]int{"hunter": config.HunterMonthlyCap, "apollo": config.ApolloMonthlyCap}
+	// Each key is an account with its own monthly allowance: the cap is per key.
+	caps := map[string]int{
+		"hunter": config.HunterMonthlyCap * max(recruiters.KeyCount(config.HunterAPIKey), 1),
+		"apollo": config.ApolloMonthlyCap * max(recruiters.KeyCount(config.ApolloAPIKey), 1),
+	}
 	// The providers of the chain that spend credits (the capped ones), listed on every day of the admin stats.
 	var creditProviders []string
 	for _, name := range config.RecruiterChain {

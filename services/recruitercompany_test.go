@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"9itchi-email-api/core"
 	"9itchi-email-api/models/api"
@@ -98,4 +99,83 @@ func TestRecruiterAtCompanyRefusals(t *testing.T) {
 		assert.Equal(t, http.StatusPaymentRequired, apiErr.Code, name)
 	}
 	assert.Zero(t, h.finder.calls)
+}
+
+// namedFinder answers a search by name with the domain and name it knows (or nothing), and one by domain with people.
+type namedFinder struct {
+	name, domain, company string
+	got                   []core.ContactQuery
+}
+
+func (f *namedFinder) Name() string { return f.name }
+
+func (f *namedFinder) Ready() bool { return true }
+
+func (f *namedFinder) Find(_ context.Context, q core.ContactQuery) (*core.ContactLookup, error) {
+	f.got = append(f.got, q)
+	if q.Domain == "" {
+		return &core.ContactLookup{Domain: f.domain, Company: f.company}, nil
+	}
+	return &core.ContactLookup{Credits: 1, Contacts: []core.Contact{{Email: "greg@" + q.Domain, FirstName: "Greg",
+		Title: "Founder & CEO", Department: "executive", Confidence: 90}}}, nil
+}
+
+func TestRecruiterAtCompanyTakesTurnsBetweenProviders(t *testing.T) {
+	h := newRecruiterHarness(nil)
+	apollo := &testFinder{name: "apollo", ready: true, credits: 1}
+	h.svc.Finders = []core.ContactFinder{h.finder, apollo}
+	h.svc.Caps = map[string]int{"hunter": 50, "apollo": 50}
+	h.pool.lookups["other.io|hunter"] = memLookup{credits: 10, at: h.now.Add(-time.Hour)}
+
+	_, apiErr := h.svc.AtCompany(context.Background(), uid, companyReq("datanomix.io"))
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, apollo.calls, "apollo used less of its cap: asked first")
+	assert.Zero(t, h.finder.calls)
+	require.Len(t, apollo.got, 1)
+	assert.Equal(t, 50, apollo.got[0].MaxCredits)
+}
+
+func TestRecruiterAtCompanyByNameWaitsForTheDomain(t *testing.T) {
+	h := newRecruiterHarness(nil)
+	apollo := &namedFinder{name: "apollo"}
+	hunter := &namedFinder{name: "hunter", domain: "datanomix.io", company: "DATANOMIX, Inc."}
+	h.svc.Finders = []core.ContactFinder{hunter, apollo}
+	h.svc.Caps = map[string]int{"hunter": 50, "apollo": 50}
+	h.pool.lookups["other.io|hunter"] = memLookup{credits: 10, at: h.now.Add(-time.Hour)}
+
+	out, apiErr := h.svc.AtCompany(context.Background(), uid, companyReq(""))
+	require.Nil(t, apiErr)
+	require.Len(t, out.Items, 1)
+	assert.Equal(t, "greg@datanomix.io", out.Items[0].Email)
+	require.Len(t, apollo.got, 2, "apollo needs a domain: asked again once hunter told it")
+	assert.Empty(t, apollo.got[0].Domain)
+	assert.Equal(t, "datanomix.io", apollo.got[1].Domain)
+}
+
+func TestRecruiterAtCompanyDropsAnotherCompany(t *testing.T) {
+	h := newRecruiterHarness(nil)
+	h.svc.Finders = []core.ContactFinder{&namedFinder{name: "hunter", domain: "datanomics.com", company: "Datanomics Labs"}}
+
+	_, apiErr := h.svc.AtCompany(context.Background(), uid, companyReq(""))
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusNotFound, apiErr.Code)
+	assert.Empty(t, h.pool.companies, "a close name is not the company")
+}
+
+func TestCompanyKeyAndNamedLookup(t *testing.T) {
+	assert.Equal(t, companyKey("Datanomix"), companyKey("DATANOMIX, Inc."))
+	assert.Equal(t, companyKey("datanomix"), companyKey("Data Nomix SARL"))
+	assert.Equal(t, "group", companyKey("Group"), "a lone legal word stays")
+	assert.NotEqual(t, companyKey("Datanomix"), companyKey("Datanomics"))
+
+	h := newRecruiterHarness(nil)
+	_, _ = h.pool.SaveCompany(context.Background(), &db.Company{Domain: "datanomix.io", Name: "DATANOMIX, Inc.", Source: "hunter"})
+	_, _ = h.pool.SaveCompany(context.Background(), &db.Company{Domain: "datanomics.com", Name: "Datanomics", Source: "hunter"})
+	got, err := h.svc.companyNamed(context.Background(), "Datanomix")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "datanomix.io", got.Domain)
+	none, err := h.svc.companyNamed(context.Background(), "Datanom")
+	require.NoError(t, err)
+	assert.Nil(t, none)
 }

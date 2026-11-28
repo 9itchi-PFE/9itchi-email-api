@@ -34,9 +34,9 @@ func NewHunter(cfg Config) *Hunter { return &Hunter{cfg: cfg} }
 
 func (h *Hunter) Name() string { return "hunter" }
 
-func (h *Hunter) Ready() bool { return h.key() != "" }
+func (h *Hunter) Ready() bool { return len(h.keys()) > 0 }
 
-func (h *Hunter) key() string { return h.cfg.key("hunter", h.cfg.HunterAPIKey) }
+func (h *Hunter) keys() []string { return h.cfg.keys("hunter", h.cfg.HunterAPIKey) }
 
 func (h *Hunter) base() string {
 	if h.cfg.HunterURL != "" {
@@ -117,12 +117,13 @@ func (h *Hunter) Find(ctx context.Context, q core.ContactQuery) (*core.ContactLo
 // domainSearch is one Domain Search call. A company Hunter does not know (400, 404) is nil data, not an error. The
 // credits are Hunter's X-Credits-Used header when sent, else 1 when the search returned someone.
 func (h *Hunter) domainSearch(ctx context.Context, params url.Values) (*hunterDomainData, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.base()+"/v2/domain-search?"+params.Encode(), nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("X-API-KEY", h.key())
-	resp, err := h.cfg.client().Do(req)
+	resp, err := h.cfg.send("hunter", h.keys(), func(key string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.base()+"/v2/domain-search?"+params.Encode(), nil)
+		if err == nil {
+			req.Header.Set("X-API-KEY", key)
+		}
+		return req, err
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: hunter unreachable", core.ErrPeerUnavailable)
 	}
@@ -172,13 +173,14 @@ func (h *Hunter) Discover(ctx context.Context, q core.CompanyQuery) ([]core.Comp
 		body["headquarters_location"] = map[string]any{"include": []map[string]string{loc}}
 	}
 	b, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.base()+"/v2/discover", bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-KEY", h.key())
-	resp, err := h.cfg.client().Do(req)
+	resp, err := h.cfg.send("hunter", h.keys(), func(key string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.base()+"/v2/discover", bytes.NewReader(b))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-API-KEY", key)
+		}
+		return req, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: hunter unreachable", core.ErrPeerUnavailable)
 	}

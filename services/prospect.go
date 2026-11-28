@@ -241,8 +241,11 @@ func (s *recruiterService) prospect(ctx context.Context, userID string, q prospe
 }
 
 // companyPeople are the usable people of a company: from the pool when it has someone checked recently, else from
-// the finders in chain order (a finder without its key, asked for the domain within 90 days or over its monthly cap
-// is skipped), stopping at the first that gives someone. Every answer is written to the pool.
+// the finders (finderOrder: free ones first, then the capped ones least used this month first, so Hunter and Apollo
+// take turns), stopping at the first that gives someone. A finder without its key, asked for the domain within 90
+// days or over its monthly cap is skipped. A company known only by name is resolved by a finder that can (Hunter);
+// a finder that needs a domain gets its turn once the domain is known, and the name the finder gives must be the
+// company's (else the answer is dropped: never another company with a close name). Every answer goes to the pool.
 func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip map[string]bool) ([]db.Contact, bool, error) {
 	now := s.Now()
 	if c.company.ID != "" {
@@ -254,15 +257,17 @@ func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip
 			return people, true, nil
 		}
 	}
-	month := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	for _, f := range s.Finders {
+	queue, budgets, err := s.finderOrder(ctx, now)
+	if err != nil {
+		return nil, false, err
+	}
+	var waiting []core.ContactFinder
+	for i := 0; i < len(queue); i++ {
+		f := queue[i]
 		if ctx.Err() != nil {
 			break
 		}
 		name := f.Name()
-		if !f.Ready() {
-			continue
-		}
 		domain := c.company.Domain
 		if domain != "" {
 			asked, err := s.Pool.LookupSince(ctx, domain, name, now.Add(-lookupWindow))
@@ -273,33 +278,30 @@ func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip
 				continue
 			}
 		}
-		budget := math.MaxInt32
-		if limit, ok := s.Caps[name]; ok {
-			used, err := s.Pool.CreditsSince(ctx, name, month)
-			if err != nil {
-				return nil, false, err
-			}
-			if used >= limit {
-				continue
-			}
-			budget = limit - used
-		}
-		res, err := f.Find(ctx, core.ContactQuery{Domain: domain, Company: c.company.Name, MaxCredits: budget})
+		res, err := f.Find(ctx, core.ContactQuery{Domain: domain, Company: c.company.Name, MaxCredits: budgets[name]})
 		if res == nil {
 			res = &core.ContactLookup{}
 		}
-		if res.Credits > 0 && s.Credits != nil {
-			s.Credits(name, int64(res.Credits))
-		}
 		if res.Credits > 0 {
+			budgets[name] = max(budgets[name]-res.Credits, 0)
+			if s.Credits != nil {
+				s.Credits(name, int64(res.Credits))
+			}
 			if cerr := s.Pool.SaveCredits(ctx, name, res.Credits); cerr != nil {
 				utils.Logger.Logger.Warnw("provider credits not logged", "provider", name, "error", cerr)
 			}
 		}
 		if domain == "" && err == nil {
-			// Asked by name: the finder told the domain (else the company is skipped).
+			// Asked by name: the finder told the domain, else it needs one and waits for it.
 			d, ok := hostOf(res.Domain)
 			if !ok || d == "" {
+				if res.Credits == 0 {
+					waiting = append(waiting, f)
+				}
+				continue
+			}
+			if res.Company != "" && companyKey(res.Company) != companyKey(c.company.Name) {
+				utils.Logger.Logger.Infow("contact finder named another company", "provider", name)
 				continue
 			}
 			if skip[d] {
@@ -313,6 +315,8 @@ func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip
 				return nil, false, serr
 			}
 			c.company, domain = *saved, d
+			queue = append(queue, waiting...)
+			waiting = nil
 		}
 		if domain != "" && (err == nil || res.Credits > 0) {
 			if lerr := s.Pool.SaveLookup(ctx, domain, name, len(res.Contacts), res.Credits); lerr != nil {
@@ -339,6 +343,46 @@ func (s *recruiterService) companyPeople(ctx context.Context, c *candidate, skip
 		}
 	}
 	return nil, false, nil
+}
+
+// finderOrder is the order the finders are asked in, with what each may spend: the finders without a monthly cap
+// (free: the website) first in chain order, then the capped ones by the share of their cap used this UTC month,
+// least used first (equal shares keep chain order). A finder without its key or with its cap used is left out.
+func (s *recruiterService) finderOrder(ctx context.Context, now time.Time) ([]core.ContactFinder, map[string]int, error) {
+	month := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
+	type capped struct {
+		f     core.ContactFinder
+		share float64
+	}
+	var free []core.ContactFinder
+	var paid []capped
+	budgets := map[string]int{}
+	for _, f := range s.Finders {
+		if !f.Ready() {
+			continue
+		}
+		name := f.Name()
+		limit, ok := s.Caps[name]
+		if !ok {
+			free = append(free, f)
+			budgets[name] = math.MaxInt32
+			continue
+		}
+		used, err := s.Pool.CreditsSince(ctx, name, month)
+		if err != nil {
+			return nil, nil, err
+		}
+		if used >= limit {
+			continue
+		}
+		paid = append(paid, capped{f: f, share: float64(used) / float64(limit)})
+		budgets[name] = limit - used
+	}
+	slices.SortStableFunc(paid, func(a, b capped) int { return cmp.Compare(a.share, b.share) })
+	for _, p := range paid {
+		free = append(free, p.f)
+	}
+	return free, budgets, nil
 }
 
 // savePoolCompany writes a company to the pool, keeping what it already knew and filling what it did not. created
@@ -448,19 +492,22 @@ func boolInt(b bool) int {
 	return 0
 }
 
-// titleBucket ranks a title: recruiters 3; founders and chiefs of a small (or unknown size) company 2; heads of
-// engineering, tech or data 2; anyone else 1.
+// titleBucket ranks a title: recruiters 4; founders and chiefs of a small (or unknown size) company 3; heads of
+// engineering, tech or data 2; anyone else with a title 1; no title 0.
 func titleBucket(title, size string) int {
 	t := " " + wordText(title) + " "
+	if strings.TrimSpace(t) == "" {
+		return 0
+	}
 	has := func(parts ...string) bool {
 		return slices.ContainsFunc(parts, func(p string) bool { return strings.Contains(t, p) })
 	}
 	switch {
 	case has("recrut", "recruit", "talent", " rh ", " hr ", "ressources humaines", "human resources", " people "):
-		return 3
-	case has(" founder", "fondat", " ceo ", " cto ", " coo ", " gerant"):
+		return 4
+	case has(" founder", "cofounder", "fondat", " ceo ", " cto ", " coo ", " gerant"):
 		if size == "" || size == "1-10" || size == "11-50" {
-			return 2
+			return 3
 		}
 		return 1
 	case has("head", "lead", "manager", "responsable", "directeur", "director", "chef") &&

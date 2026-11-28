@@ -11,7 +11,7 @@ import (
 	"9itchi-email-api/core"
 )
 
-// Config is what the sources need. Keys come from env; Token, when set and non-empty for a provider, wins over the
+// Config is what the sources need. Keys come from env (comma separated: several accounts); Token, when set and non-empty for a provider, wins over the
 // env key (the token an admin set in statistics-api). Base URLs and HTTP are for tests; empty means the real API.
 type Config struct {
 	HunterAPIKey string
@@ -20,16 +20,6 @@ type Config struct {
 	HunterURL    string
 	ApolloURL    string
 	HTTP         *http.Client
-}
-
-// key is the token an admin set for the provider, else the env key.
-func (c Config) key(provider, env string) string {
-	if c.Token != nil {
-		if k := c.Token(provider); k != "" {
-			return k
-		}
-	}
-	return env
 }
 
 // Finders maps a contact finder name to its constructor.
