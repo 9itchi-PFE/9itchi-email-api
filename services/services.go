@@ -28,6 +28,7 @@ type Services struct {
 	Score       ScoreService
 	Recruiter   RecruiterService
 	PoolStats   PoolStatsService
+	Usage       UsageService
 	Clients     *Clients
 }
 
@@ -96,6 +97,11 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 	matchDeps := MatchDeps{
 		Repo: repos.Match, Jobs: clients.Job, Resumes: clients.Resume, Matcher: clients.Ai, Quotas: clients.Payments, Config: config,
 	}
+	recruiter := NewRecruiterService(RecruiterDeps{
+		Repo: repos.Recruiter, Pool: repos.Prospect, Offers: clients.Job, Finders: finders, Discoverers: discoverers,
+		Caps:    caps,
+		Credits: credits.Report, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
+	})
 	return &Services{
 		Erase:       NewEraseService(repos.Erase),
 		Gmail:       gmail,
@@ -103,12 +109,11 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 		Application: NewApplicationService(repos.Application, emails, clients.Job, events),
 		Match:       NewMatchService(matchDeps),
 		Score:       NewScoreService(matchDeps),
-		Recruiter: NewRecruiterService(RecruiterDeps{
-			Repo: repos.Recruiter, Pool: repos.Prospect, Offers: clients.Job, Finders: finders, Discoverers: discoverers,
-			Caps:    caps,
-			Credits: credits.Report, Skills: clients.Resume, Quotas: clients.Payments, Config: config,
+		Recruiter:   recruiter,
+		PoolStats:   NewPoolStatsService(PoolStatsDeps{Repo: repos.PoolStats, CreditProviders: creditProviders}),
+		Usage: NewUsageService(UsageDeps{
+			Email: emails, Recruiter: recruiter, Drafts: repos.Draft, Matches: repos.Match, Quotas: clients.Payments,
 		}),
-		PoolStats: NewPoolStatsService(PoolStatsDeps{Repo: repos.PoolStats, CreditProviders: creditProviders}),
-		Clients:   clients,
+		Clients: clients,
 	}, nil
 }
