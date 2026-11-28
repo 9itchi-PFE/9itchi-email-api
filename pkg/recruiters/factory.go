@@ -14,20 +14,23 @@ import (
 // Config is what the sources need. Keys come from env (comma separated: several accounts); Token, when set and non-empty for a provider, wins over the
 // env key (the token an admin set in statistics-api). Base URLs and HTTP are for tests; empty means the real API.
 type Config struct {
-	HunterAPIKey string
-	ApolloAPIKey string
-	Token        func(provider string) string
-	HunterURL    string
-	ApolloURL    string
-	HTTP         *http.Client
+	HunterAPIKey      string
+	ApolloAPIKey      string
+	QuickEnrichAPIKey string
+	Token             func(provider string) string
+	HunterURL         string
+	ApolloURL         string
+	QuickEnrichURL    string
+	HTTP              *http.Client
 }
 
 // Finders maps a contact finder name to its constructor.
 var Finders = map[string]func(Config) core.ContactFinder{
-	"website": func(Config) core.ContactFinder { return NewWebsite() },
-	"hunter":  func(c Config) core.ContactFinder { return NewHunter(c) },
-	"apollo":  func(c Config) core.ContactFinder { return NewApollo(c) },
-	"fake":    func(Config) core.ContactFinder { return Fake{} },
+	"website":     func(Config) core.ContactFinder { return NewWebsite() },
+	"hunter":      func(c Config) core.ContactFinder { return NewHunter(c) },
+	"apollo":      func(c Config) core.ContactFinder { return NewApollo(c) },
+	"quickenrich": func(c Config) core.ContactFinder { return NewQuickEnrich(c) },
+	"fake":        func(Config) core.ContactFinder { return Fake{} },
 }
 
 // Discoverers maps a company discoverer name to its constructor.

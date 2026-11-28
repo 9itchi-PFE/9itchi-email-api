@@ -46,7 +46,9 @@ type Clients struct {
 func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Services, error) {
 	// The admin credit tracker: providers report what they spent, and a token an admin set wins over the env key.
 	credits := statistics.New(config.StatisticsAPIURL, config.InternalAPIKey)
-	rcfg := recruiters.Config{HunterAPIKey: config.HunterAPIKey, ApolloAPIKey: config.ApolloAPIKey}
+	rcfg := recruiters.Config{
+		HunterAPIKey: config.HunterAPIKey, ApolloAPIKey: config.ApolloAPIKey, QuickEnrichAPIKey: config.QuickEnrichAPIKey,
+	}
 	if credits.Enabled() {
 		rcfg.Token = credits.Token
 	}
@@ -80,8 +82,9 @@ func InitServices(config utils.AppConfig, repos *repositories.Repositories) (*Se
 	})
 	// Each key is an account with its own monthly allowance: the cap is per key.
 	caps := map[string]int{
-		"hunter": config.HunterMonthlyCap * max(recruiters.KeyCount(config.HunterAPIKey), 1),
-		"apollo": config.ApolloMonthlyCap * max(recruiters.KeyCount(config.ApolloAPIKey), 1),
+		"hunter":      config.HunterMonthlyCap * max(recruiters.KeyCount(config.HunterAPIKey), 1),
+		"apollo":      config.ApolloMonthlyCap * max(recruiters.KeyCount(config.ApolloAPIKey), 1),
+		"quickenrich": config.QuickEnrichMonthlyCap * max(recruiters.KeyCount(config.QuickEnrichAPIKey), 1),
 	}
 	// The providers of the chain that spend credits (the capped ones), listed on every day of the admin stats.
 	var creditProviders []string
