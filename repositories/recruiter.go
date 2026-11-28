@@ -68,7 +68,7 @@ func (r *recruiterRepository) CountSearchesSince(ctx context.Context, userID str
 	defer cancel()
 	var n int
 	err := r.store.Conn(ctx).QueryRow(ctx,
-		`SELECT count(*) FROM recruiter_searches WHERE user_id = $1 AND created_at >= $2`, userID, since).Scan(&n)
+		`SELECT coalesce(sum(credits), 0) FROM recruiter_searches WHERE user_id = $1 AND created_at >= $2`, userID, since).Scan(&n)
 	return n, MapError(err)
 }
 
@@ -89,13 +89,13 @@ func (r *recruiterRepository) SaveSearch(ctx context.Context, s *db.RecruiterSea
 		var err error
 		saved, err = scanSearch(r.store.Conn(ctx).QueryRow(ctx, `
 			INSERT INTO recruiter_searches (user_id, query, query_hash, provider, result_count,
-				companies_from_pool, companies_discovered, contacts_from_pool, contacts_found)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			RETURNING `+searchColumns, append([]any{s.UserID, s.Query, s.QueryHash, s.Provider, len(found)}, searchStatsArgs(s.Stats)...)...))
+				companies_from_pool, companies_discovered, contacts_from_pool, contacts_found, credits)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING `+searchColumns, append(append([]any{s.UserID, s.Query, s.QueryHash, s.Provider, len(found)}, searchStatsArgs(s.Stats)...), searchCredits(s))...))
 		if err != nil {
 			return err
 		}
-		saved.Stats = s.Stats
+		saved.Stats, saved.Credits = s.Stats, searchCredits(s)
 		out = make([]db.Recruiter, 0, len(found))
 		for _, f := range found {
 			x, err := scanRecruiter(r.store.Conn(ctx).QueryRow(ctx, `
@@ -116,6 +116,14 @@ func (r *recruiterRepository) SaveSearch(ctx context.Context, s *db.RecruiterSea
 		return nil, nil, err
 	}
 	return saved, out, nil
+}
+
+// searchCredits is what a search takes from the daily allowance: its Credits, 1 when not set.
+func searchCredits(s *db.RecruiterSearch) int {
+	if s.Credits <= 0 {
+		return 1
+	}
+	return s.Credits
 }
 
 // searchStatsArgs are the four stats columns of a search in insert order (all NULL when not stored).

@@ -95,8 +95,15 @@ func (s *recruiterService) AtCompany(ctx context.Context, userID string, req api
 	} else if !errors.Is(err, repositories.ErrNotFound) {
 		return nil, repoError(err, "search not found")
 	}
-	if apiErr := s.searchLeft(ctx, userID); apiErr != nil {
+	// Each recruiter given back costs 1 credit: no more than the credits left today. The others the finder gave
+	// stay in the pool for a later search.
+	allowance, apiErr := s.searchLeft(ctx, userID)
+	if apiErr != nil {
 		return nil, apiErr
+	}
+	most := perCompany
+	if allowance.Remaining != nil {
+		most = min(most, *allowance.Remaining)
 	}
 
 	var stats api.ProspectStats
@@ -133,8 +140,8 @@ func (s *recruiterService) AtCompany(ctx context.Context, userID string, req api
 		stats.CompaniesDiscovered++
 	}
 	rankPeople(people, cand.company.SizeRange)
-	picks := make([]prospect, 0, perCompany)
-	for _, p := range people[:min(len(people), perCompany)] {
+	picks := make([]prospect, 0, most)
+	for _, p := range people[:min(len(people), most)] {
 		picks = append(picks, prospect{cand: cand, contact: p, fromPool: pooled})
 	}
 	if pooled {
@@ -143,7 +150,7 @@ func (s *recruiterService) AtCompany(ctx context.Context, userID string, req api
 		stats.ContactsFound = len(picks)
 	}
 	search, saved, err := s.Repo.SaveSearch(ctx, &db.RecruiterSearch{
-		UserID: userID, Query: key, QueryHash: hash, Provider: searchProvider,
+		UserID: userID, Query: key, QueryHash: hash, Provider: searchProvider, Credits: len(picks),
 		Stats: &db.SearchStats{
 			CompaniesFromPool: stats.CompaniesFromPool, CompaniesDiscovered: stats.CompaniesDiscovered,
 			ContactsFromPool: stats.ContactsFromPool, ContactsFound: stats.ContactsFound,

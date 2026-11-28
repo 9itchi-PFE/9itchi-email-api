@@ -34,7 +34,7 @@ func (m *memRecruiters) CountSearchesSince(_ context.Context, userID string, sin
 	n := 0
 	for _, s := range m.searches {
 		if s.UserID == userID && !s.CreatedAt.Before(since) {
-			n++
+			n += max(s.Credits, 1)
 		}
 	}
 	return n, nil
