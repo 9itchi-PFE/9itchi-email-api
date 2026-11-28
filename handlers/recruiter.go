@@ -27,6 +27,23 @@ func SearchRecruiters(svc services.RecruiterService) gin.HandlerFunc {
 	}
 }
 
+// CompanyRecruiters: POST /recruiters/company (user) recruiters at one company (an offer read from a link).
+func CompanyRecruiters(svc services.RecruiterService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req api.CompanyRecruiterRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.AtCompany(c.Request.Context(), c.GetString("user_id"), req)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // ListRecruiters: GET /recruiters (user) every recruiter found for the student.
 func ListRecruiters(svc services.RecruiterService) gin.HandlerFunc {
 	return func(c *gin.Context) {

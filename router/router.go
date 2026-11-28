@@ -54,6 +54,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.POST("/applications/:id/follow-up/draft", handlers.DraftFollowUp(services.Application))
 		userGroup.POST("/applications/:id/follow-up", handlers.FollowUp(services.Application))
 		userGroup.POST("/recruiters/search", handlers.SearchRecruiters(services.Recruiter))
+		userGroup.POST("/recruiters/company", handlers.CompanyRecruiters(services.Recruiter))
 		userGroup.GET("/recruiters", handlers.ListRecruiters(services.Recruiter))
 		userGroup.GET("/recruiters/allowance", handlers.RecruiterAllowance(services.Recruiter))
 		userGroup.POST("/recruiters/:id/draft", handlers.DraftForRecruiter(services.Email))

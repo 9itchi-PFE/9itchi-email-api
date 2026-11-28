@@ -180,6 +180,18 @@ func (m *memPool) CompanyByDomain(_ context.Context, domain string) (*db.Company
 	return nil, repositories.ErrNotFound
 }
 
+func (m *memPool) CompanyByName(_ context.Context, name string) (*db.Company, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := len(m.companies) - 1; i >= 0; i-- {
+		if strings.EqualFold(m.companies[i].Name, name) {
+			c := m.companies[i]
+			return &c, nil
+		}
+	}
+	return nil, repositories.ErrNotFound
+}
+
 func (m *memPool) SaveCompany(_ context.Context, c *db.Company) (*db.Company, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

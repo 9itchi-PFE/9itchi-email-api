@@ -40,6 +40,8 @@ var tunis = time.FixedZone("Africa/Tunis", 3600)
 type RecruiterService interface {
 	// POST /recruiters/search: companies that fit what the student looks for and the right people there
 	Search(ctx context.Context, userID string, req api.RecruiterSearchRequest) (*api.RecruiterSearchResponse, *models.ApiError)
+	// POST /recruiters/company: the right people at one company (an offer's), counted only when someone is found
+	AtCompany(ctx context.Context, userID string, req api.CompanyRecruiterRequest) (*api.RecruiterSearchResponse, *models.ApiError)
 	// GET /recruiters: every recruiter found for the student, each person once
 	List(ctx context.Context, userID string) (*api.RecruitersResponse, *models.ApiError)
 	// GET /recruiters/allowance: the plan's daily limit of searches and how much of it is used today
@@ -113,6 +115,21 @@ func (s *recruiterService) Allowance(ctx context.Context, userID string) (*api.R
 	return s.allowance(ctx, userID)
 }
 
+// searchLeft is a 402 when the plan has no recruiter search or today's are used up.
+func (s *recruiterService) searchLeft(ctx context.Context, userID string) *models.ApiError {
+	a, apiErr := s.allowance(ctx, userID)
+	if apiErr != nil {
+		return apiErr
+	}
+	switch {
+	case a.Limit != nil && *a.Limit == 0:
+		return apiError(http.StatusPaymentRequired, "recruiter search is part of the subscription")
+	case a.Limit != nil && a.Used >= *a.Limit:
+		return apiError(http.StatusPaymentRequired, "daily limit of recruiter searches reached")
+	}
+	return nil
+}
+
 func (s *recruiterService) Search(ctx context.Context, userID string, req api.RecruiterSearchRequest) (*api.RecruiterSearchResponse, *models.ApiError) {
 	if req.ResumeID == "" {
 		return nil, apiError(http.StatusBadRequest, "resume_id is required")
@@ -165,15 +182,8 @@ func (s *recruiterService) Search(ctx context.Context, userID string, req api.Re
 		return nil, repoError(err, "search not found")
 	}
 
-	a, apiErr := s.allowance(ctx, userID)
-	if apiErr != nil {
+	if apiErr := s.searchLeft(ctx, userID); apiErr != nil {
 		return nil, apiErr
-	}
-	switch {
-	case a.Limit != nil && *a.Limit == 0:
-		return nil, apiError(http.StatusPaymentRequired, "recruiter search is part of the subscription")
-	case a.Limit != nil && a.Used >= *a.Limit:
-		return nil, apiError(http.StatusPaymentRequired, "daily limit of recruiter searches reached")
 	}
 
 	pctx, cancel := context.WithTimeout(ctx, prospectTimeout)
