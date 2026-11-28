@@ -206,11 +206,7 @@ func (s *recruiterService) prospect(ctx context.Context, userID string, q prospe
 		if len(people) == 0 {
 			continue
 		}
-		size := c.company.SizeRange
-		slices.SortStableFunc(people, func(a, b db.Contact) int {
-			return cmp.Or(cmp.Compare(titleBucket(b.Title, size), titleBucket(a.Title, size)),
-				cmp.Compare(boolInt(b.Verification == "valid"), boolInt(a.Verification == "valid")), cmp.Compare(b.Confidence, a.Confidence))
-		})
+		rankPeople(people, c.company.SizeRange)
 		picks = append(picks, prospect{cand: c, contact: people[0], fromPool: pooled})
 		rest[c], fromPool[c] = people[1:min(len(people), perCompany)], pooled
 	}
@@ -405,6 +401,14 @@ func (s *recruiterService) savePoolContact(ctx context.Context, companyID, sourc
 // companySearchText is what the pool search matches: name, industry, description and keywords, folded.
 func companySearchText(c db.Company) string {
 	return wordText(strings.Join(append([]string{c.Name, c.Industry, c.Description}, c.Keywords...), " "))
+}
+
+// rankPeople orders the people of one company: recruiters first, then verified addresses, then confidence.
+func rankPeople(people []db.Contact, size string) {
+	slices.SortStableFunc(people, func(a, b db.Contact) int {
+		return cmp.Or(cmp.Compare(titleBucket(b.Title, size), titleBucket(a.Title, size)),
+			cmp.Compare(boolInt(b.Verification == "valid"), boolInt(a.Verification == "valid")), cmp.Compare(b.Confidence, a.Confidence))
+	})
 }
 
 func usable(c db.Contact) bool {

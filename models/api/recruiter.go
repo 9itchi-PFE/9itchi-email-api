@@ -15,6 +15,14 @@ type RecruiterSearchRequest struct {
 	Contacts int      `json:"contacts"`
 }
 
+// CompanyRecruiterRequest is the body of POST /recruiters/company: the company of an offer (its name, and its
+// domain or site when known) and what the student wants there (the offer title).
+type CompanyRecruiterRequest struct {
+	Company string `json:"company" binding:"required,max=120"`
+	Domain  string `json:"domain" binding:"max=255"`
+	Goal    string `json:"goal" binding:"max=300"`
+}
+
 // RecruiterItem is one recruiter found for the student.
 type RecruiterItem struct {
 	ID              string    `json:"id"`
