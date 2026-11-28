@@ -15,6 +15,7 @@ type ApplyRequest struct {
 	Subject     string     `json:"subject" binding:"max=200"`
 	Body        string     `json:"body" binding:"max=10000"`
 	ScheduledAt *time.Time `json:"scheduled_at"`
+	LetterFields
 }
 
 // FollowUpDraftRequest is the body of POST /applications/:id/follow-up/draft: the AI writes a follow-up of the

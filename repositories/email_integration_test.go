@@ -150,3 +150,41 @@ func TestEmailRepositoryUpdateScheduled(t *testing.T) {
 	_, err = repo.UpdateScheduled(ctx, user, e.ID, edit)
 	assert.ErrorIs(t, err, ErrNotFound, "no longer scheduled")
 }
+
+// The cover letter fields are stored, edited and read back; a row made without them sends no letter.
+func TestEmailRepositoryLetterFields(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	repo := NewEmailRepository(store)
+	const user = "00000000-0000-0000-0000-0000000000b1"
+	name, lang := "رسالة_تحفيزية_Ines", "ar"
+	at := time.Now().Add(time.Hour)
+
+	e, err := repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailScheduled,
+		ScheduledAt: &at, LetterFilename: &name, AttachLetter: true, LetterLanguage: &lang})
+	require.NoError(t, err)
+	require.NotNil(t, e.LetterFilename)
+	assert.Equal(t, name, *e.LetterFilename)
+	assert.True(t, e.AttachLetter)
+	assert.Equal(t, "ar", *e.LetterLanguage)
+
+	en := "en"
+	out, err := repo.UpdateScheduled(ctx, user, e.ID, db.EmailEdit{Recipient: "hr@acme.tn", Subject: "s", Body: "b", ScheduledAt: &at,
+		LetterFilename: nil, AttachLetter: false, LetterLanguage: &en})
+	require.NoError(t, err)
+	assert.Nil(t, out.LetterFilename)
+	assert.False(t, out.AttachLetter)
+	got, err := repo.Get(ctx, user, e.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "en", *got.LetterLanguage)
+
+	old, err := repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft})
+	require.NoError(t, err)
+	assert.False(t, old.AttachLetter)
+	assert.Nil(t, old.LetterFilename)
+	assert.Nil(t, old.LetterLanguage)
+
+	bad := "de"
+	_, err = repo.Create(ctx, &db.Email{UserID: user, Recipient: "hr@acme.tn", Subject: "s", Body: "b", Status: db.EmailDraft, LetterLanguage: &bad})
+	assert.Error(t, err, "language checked")
+}

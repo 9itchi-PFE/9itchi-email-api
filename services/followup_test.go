@@ -53,7 +53,7 @@ func TestFollowUpOfAGmailApplication(t *testing.T) {
 	m := h.mailer.sent[1]
 	assert.Equal(t, "rh@acme.tn", m.To, "the recipient of the first email")
 	assert.Equal(t, "Re: Candidature", m.Subject)
-	assert.Nil(t, m.Attachment, "never a CV")
+	assert.Empty(t, m.Attachments, "never a CV nor a letter")
 
 	_, apiErr = h.svc.FollowUp(ctx, uid, app.ID, api.FollowUpRequest{Subject: "Re: x", Body: "y"})
 	require.NotNil(t, apiErr)

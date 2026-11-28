@@ -1,9 +1,14 @@
 package resume
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"9itchi-email-api/core"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,4 +55,75 @@ func TestSummaryTextCutsOnALineEnd(t *testing.T) {
 	got := summaryText(&v)
 	assert.LessOrEqual(t, len(got), maxSummaryBytes)
 	assert.True(t, strings.HasSuffix(got, "\n"))
+}
+
+// The CV keeps the name resume-api gives it (the UTF-8 filename* wins), the imported file its own extension.
+func TestFilesTakeTheirNameFromResumeAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "k", r.Header.Get("x-api-key"))
+		switch r.URL.Path {
+		case "/internal/resumes/r1/pdf":
+			w.Header().Set("Content-Disposition", `attachment; filename="Developpeuse_React.pdf"; filename*=UTF-8''D%C3%A9veloppeuse%20React.pdf`)
+			_, _ = w.Write([]byte("%PDF cv"))
+		case "/internal/resumes/r2/pdf":
+			_, _ = w.Write([]byte("%PDF cv"))
+		case "/internal/resumes/r1/original":
+			w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+			w.Header().Set("Content-Disposition", `attachment; filename="Mon CV.docx"`)
+			_, _ = w.Write([]byte("PK"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "k")
+	ctx := context.Background()
+
+	pdf, err := c.PDF(ctx, "r1")
+	require.NoError(t, err)
+	assert.Equal(t, "Développeuse React.pdf", pdf.Filename)
+	assert.Equal(t, "application/pdf", pdf.ContentType)
+	pdf, err = c.PDF(ctx, "r2")
+	require.NoError(t, err)
+	assert.Equal(t, "CV.pdf", pdf.Filename, "no name given")
+	pdf, err = c.PDF(ctx, "gone")
+	require.NoError(t, err)
+	assert.Nil(t, pdf)
+
+	orig, err := c.Original(ctx, "r1")
+	require.NoError(t, err)
+	assert.Equal(t, "Mon CV.docx", orig.Filename)
+	assert.Equal(t, []byte("PK"), orig.Data)
+}
+
+func TestLetterPDF(t *testing.T) {
+	var got map[string]any
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/internal/letters/pdf", r.URL.Path)
+		assert.Equal(t, "k", r.Header.Get("x-api-key"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = w.Write([]byte("%PDF letter"))
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "k")
+
+	data, err := c.LetterPDF(context.Background(), core.LetterRequest{ResumeID: "r1", Language: "fr", Subject: "Objet", Body: "Bonjour", SenderEmail: "me@gmail.com"})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("%PDF letter"), data)
+	assert.Equal(t, map[string]any{"resume_id": "r1", "language": "fr", "subject": "Objet", "body": "Bonjour", "sender_email": "me@gmail.com"}, got)
+
+	got = nil
+	_, err = c.LetterPDF(context.Background(), core.LetterRequest{Language: "ar", Body: "x"})
+	require.NoError(t, err)
+	assert.NotContains(t, got, "resume_id", "no CV: no contact block")
+
+	status = http.StatusBadRequest
+	_, err = c.LetterPDF(context.Background(), core.LetterRequest{Language: "fr", Body: "x"})
+	assert.ErrorIs(t, err, core.ErrPeerUnavailable)
 }

@@ -156,7 +156,7 @@ func (s *applicationService) Apply(ctx context.Context, userID string, req api.A
 		if strings.TrimSpace(req.Subject) == "" || strings.TrimSpace(req.Body) == "" {
 			return nil, apiError(http.StatusBadRequest, "subject and body are required")
 		}
-		send := api.SendEmailRequest{JobID: req.JobID, ResumeID: req.ResumeID, To: to, Subject: req.Subject, Body: req.Body}
+		send := api.SendEmailRequest{JobID: req.JobID, ResumeID: req.ResumeID, To: to, Subject: req.Subject, Body: req.Body, LetterFields: req.LetterFields}
 		var apiErr *models.ApiError
 		if req.ScheduledAt != nil {
 			email, apiErr = s.emails.ScheduleEmail(ctx, userID, api.ScheduleEmailRequest{SendEmailRequest: send, ScheduledAt: *req.ScheduledAt})

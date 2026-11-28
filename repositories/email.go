@@ -43,14 +43,15 @@ func NewEmailRepository(store *Store) EmailRepository {
 	return &emailRepository{store: store}
 }
 
-const emailColumns = `id, user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, sent_at, tracking_id, schedule_task_id, created_at, updated_at, cv_original`
+const emailColumns = `id, user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, sent_at, tracking_id, schedule_task_id, created_at, updated_at, cv_original, letter_filename, attach_letter, letter_language`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 func scanEmail(r rowScanner) (*db.Email, error) {
 	var e db.Email
 	err := r.Scan(&e.ID, &e.UserID, &e.JobID, &e.ResumeID, &e.Recipient, &e.Subject, &e.Body, &e.Status,
-		&e.ScheduledAt, &e.SentAt, &e.TrackingID, &e.ScheduleTaskID, &e.CreatedAt, &e.UpdatedAt, &e.CVOriginal)
+		&e.ScheduledAt, &e.SentAt, &e.TrackingID, &e.ScheduleTaskID, &e.CreatedAt, &e.UpdatedAt, &e.CVOriginal,
+		&e.LetterFilename, &e.AttachLetter, &e.LetterLanguage)
 	if err != nil {
 		return nil, MapError(err)
 	}
@@ -61,10 +62,12 @@ func (r *emailRepository) Create(ctx context.Context, e *db.Email) (*db.Email, e
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanEmail(r.store.Conn(ctx).QueryRow(ctx, `
-		INSERT INTO emails (user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, tracking_id, cv_original)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, gen_random_uuid(), $9)
+		INSERT INTO emails (user_id, job_id, resume_id, recipient, subject, body, status, scheduled_at, tracking_id, cv_original,
+			letter_filename, attach_letter, letter_language)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, gen_random_uuid(), $9, $10, $11, $12)
 		RETURNING `+emailColumns,
-		e.UserID, e.JobID, e.ResumeID, e.Recipient, e.Subject, e.Body, e.Status, e.ScheduledAt, e.CVOriginal))
+		e.UserID, e.JobID, e.ResumeID, e.Recipient, e.Subject, e.Body, e.Status, e.ScheduledAt, e.CVOriginal,
+		e.LetterFilename, e.AttachLetter, e.LetterLanguage))
 }
 
 func (r *emailRepository) Get(ctx context.Context, userID, id string) (*db.Email, error) {
@@ -180,7 +183,9 @@ func (r *emailRepository) UpdateScheduled(ctx context.Context, userID, id string
 	ctx, cancel := QueryTimeout(ctx)
 	defer cancel()
 	return scanEmail(r.store.Conn(ctx).QueryRow(ctx, `
-		UPDATE emails SET recipient = $3, subject = $4, body = $5, resume_id = $6, scheduled_at = $7, schedule_task_id = $8, updated_at = now()
+		UPDATE emails SET recipient = $3, subject = $4, body = $5, resume_id = $6, scheduled_at = $7, schedule_task_id = $8,
+			letter_filename = $9, attach_letter = $10, letter_language = $11, updated_at = now()
 		WHERE id = $1 AND user_id = $2 AND status = 'scheduled'
-		RETURNING `+emailColumns, id, userID, edit.Recipient, edit.Subject, edit.Body, edit.ResumeID, edit.ScheduledAt, edit.ScheduleTaskID))
+		RETURNING `+emailColumns, id, userID, edit.Recipient, edit.Subject, edit.Body, edit.ResumeID, edit.ScheduledAt, edit.ScheduleTaskID,
+		edit.LetterFilename, edit.AttachLetter, edit.LetterLanguage))
 }

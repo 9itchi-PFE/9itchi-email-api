@@ -30,7 +30,7 @@ func TestAuthURL(t *testing.T) {
 
 func TestBuildMIME(t *testing.T) {
 	raw, err := BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "Candidature é", HTML: "<p>hi</p>",
-		Attachment: &core.Attachment{Filename: "CV.pdf", Data: []byte("%PDF-1.4")}})
+		Attachments: []core.Attachment{{Filename: "CV.pdf", Data: []byte("%PDF-1.4")}}})
 	require.NoError(t, err)
 	s := string(raw)
 	assert.Contains(t, s, "To: b@y.tn")
@@ -43,11 +43,11 @@ func TestBuildMIME(t *testing.T) {
 	// The imported file keeps its own type; a type that cannot be read never reaches the headers as it came.
 	const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	raw, err = BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x",
-		Attachment: &core.Attachment{Filename: "cv.docx", ContentType: docx, Data: []byte("PK")}})
+		Attachments: []core.Attachment{{Filename: "cv.docx", ContentType: docx, Data: []byte("PK")}}})
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "Content-Type: "+docx+"; name=\"cv.docx\"")
 	raw, err = BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x",
-		Attachment: &core.Attachment{Filename: "cv.bin", ContentType: "x\r\nBcc: evil@z.tn", Data: []byte("PK")}})
+		Attachments: []core.Attachment{{Filename: "cv.bin", ContentType: "x\r\nBcc: evil@z.tn", Data: []byte("PK")}}})
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "Content-Type: application/octet-stream; name=\"cv.bin\"")
 	assert.NotContains(t, string(raw), "evil@z.tn")
@@ -106,4 +106,39 @@ func TestExchangeRefreshSend(t *testing.T) {
 	assert.True(t, strings.Contains(string(decoded), "To: b@y.tn"))
 
 	assert.ErrorIs(t, c.Send(context.Background(), "bad", core.MailMessage{From: "a", To: "b", Subject: "s"}), core.ErrGmailAuth)
+}
+
+// The CV and the cover letter leave as two parts, in order; a non-ASCII name gets its UTF-8 form too, and a name
+// never breaks out of its header.
+func TestBuildMIMEAttachments(t *testing.T) {
+	raw, err := BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x", Attachments: []core.Attachment{
+		{Filename: "Développeuse React.pdf", Data: []byte("%PDF cv")},
+		{Filename: "رسالة_تحفيزية.pdf", ContentType: "application/pdf", Data: []byte("%PDF letter")},
+	}})
+	require.NoError(t, err)
+	s := string(raw)
+	assert.Equal(t, 2, strings.Count(s, "Content-Disposition: attachment"))
+	assert.Less(t, strings.Index(s, "filename*=UTF-8''D%C3%A9veloppeuse%20React.pdf"), strings.Index(s, "filename*=UTF-8''%D8%B1"))
+	assert.Contains(t, s, "filename=\"=?utf-8?q?")
+	assert.Equal(t, 1, strings.Count(s, "--\r\n"), "one closing boundary")
+
+	raw, err = BuildMIME(core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x", Attachments: []core.Attachment{
+		{Filename: "cv.pdf\r\nBcc: evil@z.tn\".pdf", Data: []byte("%PDF")},
+	}})
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "\r\nBcc:")
+	assert.Contains(t, string(raw), "filename=\"cv.pdfBcc: evil@z.tn.pdf\"")
+	assert.NotContains(t, string(raw), "filename*=", "an ASCII name needs no UTF-8 form")
+}
+
+func TestSendTooLarge(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	c := New("id", "secret", "http://cb")
+	c.SendURL = srv.URL
+	big := core.Attachment{Filename: "cv.pdf", Data: make([]byte, core.MaxMailBytes)}
+	err := c.Send(context.Background(), "acc", core.MailMessage{From: "a@x.tn", To: "b@y.tn", Subject: "s", HTML: "x", Attachments: []core.Attachment{big}})
+	assert.ErrorIs(t, err, core.ErrMailTooLarge)
+	assert.False(t, called)
 }

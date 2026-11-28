@@ -139,6 +139,23 @@ func DraftFromLink(svc services.EmailService) gin.HandlerFunc {
 	}
 }
 
+// AttachmentNames: GET /emails/attachment-names (user) the CV file name and the default cover letter name.
+func AttachmentNames(svc services.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var q api.AttachmentNamesQuery
+		if err := c.ShouldBindQuery(&q); err != nil {
+			models.FormatError(c, &models.ApiError{Code: http.StatusBadRequest, Error: err})
+			return
+		}
+		result, apiErr := svc.AttachmentNames(c.Request.Context(), c.GetString("user_id"), q)
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // UpdateEmail: PATCH /emails/:id (user) edit a scheduled email.
 func UpdateEmail(svc services.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {

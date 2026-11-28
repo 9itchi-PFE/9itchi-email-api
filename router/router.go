@@ -39,6 +39,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		userGroup.POST("/emails", handlers.SendEmail(services.Email))
 		userGroup.POST("/emails/schedule", handlers.ScheduleEmail(services.Email))
 		userGroup.GET("/emails", handlers.ListEmails(services.Email))
+		userGroup.GET("/emails/attachment-names", handlers.AttachmentNames(services.Email))
 		userGroup.GET("/emails/:id", handlers.GetEmail(services.Email))
 		userGroup.PATCH("/emails/:id", handlers.UpdateEmail(services.Email))
 		userGroup.DELETE("/emails/:id", handlers.CancelEmail(services.Email))

@@ -182,5 +182,5 @@ func TestSendWithoutCVHasNoAttachment(t *testing.T) {
 	_, apiErr := h.svc.SendEmail(context.Background(), uid, req)
 	require.Nil(t, apiErr)
 	require.Len(t, h.mailer.sent, 1)
-	assert.Nil(t, h.mailer.sent[0].Attachment)
+	assert.Len(t, h.mailer.sent[0].Attachments, 1, "the letter only")
 }

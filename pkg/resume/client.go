@@ -2,7 +2,9 @@
 package resume
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -199,32 +201,84 @@ func nonEmpty(in ...string) []string {
 	return out
 }
 
-// PDF calls GET /internal/resumes/:id/pdf: the CV as it is now. It returns nil when the CV does not exist.
-func (c *Client) PDF(ctx context.Context, id string) ([]byte, error) {
-	data, _, err := c.file(ctx, "/internal/resumes/"+url.PathEscape(id)+"/pdf")
-	return data, err
+// Names calls GET /resumes/:id on behalf of the user: the CV's title and the name in its contact block.
+func (c *Client) Names(ctx context.Context, bearer, id string) (*core.ResumeNames, error) {
+	out, err := c.get(ctx, bearer, id)
+	if err != nil {
+		return nil, err
+	}
+	return &core.ResumeNames{Title: out.Title, ContactName: out.Content.Contact.Name}, nil
+}
+
+// PDF calls GET /internal/resumes/:id/pdf: the CV as it is now, under the name resume-api gives it (the CV's
+// title). It returns nil when the CV does not exist.
+func (c *Client) PDF(ctx context.Context, id string) (*core.Attachment, error) {
+	data, h, err := c.file(ctx, http.MethodGet, "/internal/resumes/"+url.PathEscape(id)+"/pdf", nil)
+	if err != nil || data == nil {
+		return nil, err
+	}
+	return &core.Attachment{Filename: filename(h, "CV.pdf"), ContentType: "application/pdf", Data: data}, nil
 }
 
 // Original calls GET /internal/resumes/:id/original: the file the student imported, as it came, with its own
 // name and type. It returns nil when the CV has none.
 func (c *Client) Original(ctx context.Context, id string) (*core.Attachment, error) {
-	data, h, err := c.file(ctx, "/internal/resumes/"+url.PathEscape(id)+"/original")
+	data, h, err := c.file(ctx, http.MethodGet, "/internal/resumes/"+url.PathEscape(id)+"/original", nil)
 	if err != nil || data == nil {
 		return nil, err
 	}
-	name := "CV"
-	if _, params, err := mime.ParseMediaType(h.Get("Content-Disposition")); err == nil && strings.TrimSpace(params["filename"]) != "" {
-		name = params["filename"]
-	}
-	return &core.Attachment{Filename: name, ContentType: h.Get("Content-Type"), Data: data}, nil
+	return &core.Attachment{Filename: filename(h, "CV"), ContentType: h.Get("Content-Type"), Data: data}, nil
 }
 
-// file reads one file from resume-api. Nil data without an error means there is no such file (404) or it is
-// larger than an email can carry.
-func (c *Client) file(ctx context.Context, path string) ([]byte, http.Header, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpx.URL(c.BaseURL, path), nil)
+// letterBody is the body of POST /internal/letters/pdf.
+type letterBody struct {
+	ResumeID    string `json:"resume_id,omitempty"`
+	Language    string `json:"language"`
+	Subject     string `json:"subject,omitempty"`
+	Body        string `json:"body"`
+	SenderEmail string `json:"sender_email,omitempty"`
+}
+
+// LetterPDF calls POST /internal/letters/pdf: the cover letter rendered as a PDF.
+func (c *Client) LetterPDF(ctx context.Context, in core.LetterRequest) ([]byte, error) {
+	data, _, err := c.file(ctx, http.MethodPost, "/internal/letters/pdf", letterBody{
+		ResumeID: in.ResumeID, Language: in.Language, Subject: in.Subject, Body: in.Body, SenderEmail: in.SenderEmail,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%w: no letter", core.ErrPeerUnavailable)
+	}
+	return data, nil
+}
+
+// filename is the file name of a Content-Disposition header (filename*, the UTF-8 one, wins over filename), else
+// fallback.
+func filename(h http.Header, fallback string) string {
+	if _, params, err := mime.ParseMediaType(h.Get("Content-Disposition")); err == nil && strings.TrimSpace(params["filename"]) != "" {
+		return params["filename"]
+	}
+	return fallback
+}
+
+// file reads one file from resume-api; body, when not nil, is sent as JSON. Nil data without an error means there
+// is no such file (404) or it is larger than an email can carry.
+func (c *Client) file(ctx context.Context, method, path string, body any) ([]byte, http.Header, error) {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, nil, err
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, httpx.URL(c.BaseURL, path), reader)
 	if err != nil {
 		return nil, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("x-api-key", c.APIKey)
 	resp, err := c.HTTP.Do(req)

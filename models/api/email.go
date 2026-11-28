@@ -29,6 +29,29 @@ type SendEmailRequest struct {
 	To       string `json:"to" binding:"required,email,max=254"`
 	Subject  string `json:"subject" binding:"required,max=200"`
 	Body     string `json:"body" binding:"required,max=10000"`
+	LetterFields
+}
+
+// LetterFields say how the cover letter leaves as a PDF next to the CV. LetterFilename is its name without
+// extension (empty: the default name); AttachLetter false sends no letter (absent: one is sent); Language is the
+// letter's (absent: ar for a body in Arabic, else fr).
+type LetterFields struct {
+	LetterFilename string `json:"letter_filename" binding:"max=120"`
+	AttachLetter   *bool  `json:"attach_letter"`
+	Language       string `json:"language" binding:"omitempty,oneof=fr en ar"`
+}
+
+// AttachmentNamesQuery is GET /emails/attachment-names?resume_id=&language=.
+type AttachmentNamesQuery struct {
+	ResumeID string `form:"resume_id" binding:"omitempty,uuid"`
+	Language string `form:"language" binding:"omitempty,oneof=fr en ar"`
+}
+
+// AttachmentNamesResponse are the names the files of an application get: the CV's (with extension, "" without a
+// CV) and the default name of the cover letter (without extension).
+type AttachmentNamesResponse struct {
+	CVFilename     string `json:"cv_filename"`
+	LetterFilename string `json:"letter_filename"`
 }
 
 // ScheduleEmailRequest is the body of POST /emails/schedule.
@@ -144,12 +167,16 @@ type DraftFromLinkResponse struct {
 }
 
 // UpdateEmailRequest is the body of PATCH /emails/:id: what changes in a scheduled email (absent: unchanged).
-// AttachCV false sends it without a CV; true attaches ResumeID, or the CV it already carries.
+// AttachCV false sends it without a CV; true attaches ResumeID, or the CV it already carries. LetterFilename ""
+// gives the cover letter its default name back.
 type UpdateEmailRequest struct {
-	To          *string    `json:"to" binding:"omitempty,email,max=254"`
-	Subject     *string    `json:"subject" binding:"omitempty,max=200"`
-	Body        *string    `json:"body" binding:"omitempty,max=10000"`
-	ScheduledAt *time.Time `json:"scheduled_at"`
-	AttachCV    *bool      `json:"attach_cv"`
-	ResumeID    *string    `json:"resume_id" binding:"omitempty,uuid"`
+	To             *string    `json:"to" binding:"omitempty,email,max=254"`
+	Subject        *string    `json:"subject" binding:"omitempty,max=200"`
+	Body           *string    `json:"body" binding:"omitempty,max=10000"`
+	ScheduledAt    *time.Time `json:"scheduled_at"`
+	AttachCV       *bool      `json:"attach_cv"`
+	ResumeID       *string    `json:"resume_id" binding:"omitempty,uuid"`
+	LetterFilename *string    `json:"letter_filename" binding:"omitempty,max=120"`
+	AttachLetter   *bool      `json:"attach_letter"`
+	Language       *string    `json:"language" binding:"omitempty,oneof=fr en ar"`
 }
