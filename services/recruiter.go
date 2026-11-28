@@ -115,19 +115,19 @@ func (s *recruiterService) Allowance(ctx context.Context, userID string) (*api.R
 	return s.allowance(ctx, userID)
 }
 
-// searchLeft is a 402 when the plan has no recruiter search or today's are used up.
-func (s *recruiterService) searchLeft(ctx context.Context, userID string) *models.ApiError {
+// searchLeft is today's allowance, or a 402 when the plan has no recruiter search or today's are used up.
+func (s *recruiterService) searchLeft(ctx context.Context, userID string) (*api.RecruiterAllowance, *models.ApiError) {
 	a, apiErr := s.allowance(ctx, userID)
 	if apiErr != nil {
-		return apiErr
+		return nil, apiErr
 	}
 	switch {
 	case a.Limit != nil && *a.Limit == 0:
-		return apiError(http.StatusPaymentRequired, "recruiter search is part of the subscription")
+		return nil, apiError(http.StatusPaymentRequired, "recruiter search is part of the subscription")
 	case a.Limit != nil && a.Used >= *a.Limit:
-		return apiError(http.StatusPaymentRequired, "daily limit of recruiter searches reached")
+		return nil, apiError(http.StatusPaymentRequired, "daily limit of recruiter searches reached")
 	}
-	return nil
+	return a, nil
 }
 
 func (s *recruiterService) Search(ctx context.Context, userID string, req api.RecruiterSearchRequest) (*api.RecruiterSearchResponse, *models.ApiError) {
@@ -182,7 +182,7 @@ func (s *recruiterService) Search(ctx context.Context, userID string, req api.Re
 		return nil, repoError(err, "search not found")
 	}
 
-	if apiErr := s.searchLeft(ctx, userID); apiErr != nil {
+	if _, apiErr := s.searchLeft(ctx, userID); apiErr != nil {
 		return nil, apiErr
 	}
 

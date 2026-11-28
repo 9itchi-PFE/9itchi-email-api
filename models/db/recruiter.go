@@ -11,7 +11,9 @@ type RecruiterSearch struct {
 	QueryHash   string
 	Provider    string
 	ResultCount int
-	CreatedAt   time.Time
+	// Credits is what the search took from the daily recruiter allowance (0 on insert: 1).
+	Credits   int
+	CreatedAt time.Time
 	// Stats is what a fresh search took from the pool and from the providers (nil: not stored, written as NULL).
 	Stats *SearchStats
 }

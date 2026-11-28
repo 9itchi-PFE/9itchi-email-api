@@ -30,7 +30,7 @@ func TestRecruiterAtCompanyFindsSavesAndCounts(t *testing.T) {
 	assert.Equal(t, "datanomix.io", out.Items[0].Domain)
 	assert.Equal(t, "Datanomix", out.Items[0].Company)
 	assert.Equal(t, api.ProspectStats{CompaniesDiscovered: 1, ContactsFound: 2}, out.Stats)
-	assert.Equal(t, 1, out.Allowance.Used, "one search counted")
+	assert.Equal(t, 2, out.Allowance.Used, "one credit per recruiter given back")
 	assert.Equal(t, 1, h.finder.calls)
 
 	require.Len(t, h.pool.companies, 1, "the company joins the pool")
@@ -43,7 +43,7 @@ func TestRecruiterAtCompanyFindsSavesAndCounts(t *testing.T) {
 	again, apiErr := h.svc.AtCompany(context.Background(), uid, companyReq("datanomix.io"))
 	require.Nil(t, apiErr)
 	assert.True(t, again.Cached)
-	assert.Equal(t, 1, again.Allowance.Used)
+	assert.Equal(t, 2, again.Allowance.Used)
 	assert.Equal(t, 1, h.finder.calls)
 
 	// Another student: the pool answers, no provider asked.
@@ -51,8 +51,23 @@ func TestRecruiterAtCompanyFindsSavesAndCounts(t *testing.T) {
 	require.Nil(t, apiErr)
 	require.Len(t, other.Items, 2)
 	assert.Equal(t, api.ProspectStats{CompaniesFromPool: 1, ContactsFromPool: 2}, other.Stats)
-	assert.Equal(t, 1, other.Allowance.Used, "found in the pool: counted like a lookup")
+	assert.Equal(t, 2, other.Allowance.Used, "found in the pool: charged the same")
 	assert.Equal(t, 1, h.finder.calls)
+}
+
+func TestRecruiterAtCompanyGivesNoMoreThanTheCreditsLeft(t *testing.T) {
+	h := newRecruiterHarness(map[string]int{core.QuotaRecruiterSearches: 1})
+	out, apiErr := h.svc.AtCompany(context.Background(), uid, companyReq("datanomix.io"))
+	require.Nil(t, apiErr)
+	require.Len(t, out.Items, 1, "1 credit left: 1 recruiter")
+	assert.Equal(t, "Sarra Gharbi", out.Items[0].Name, "the best ranked")
+	assert.Equal(t, 1, out.Allowance.Used)
+	assert.Len(t, h.pool.contacts, 2, "the other one waits in the pool")
+	assert.Equal(t, 1, h.repo.searches[0].Credits)
+
+	_, apiErr = h.svc.AtCompany(context.Background(), uid, api.CompanyRecruiterRequest{Company: "Other", Domain: "other.example"})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusPaymentRequired, apiErr.Code, "no credit left")
 }
 
 func TestRecruiterAtCompanyByNameFromPool(t *testing.T) {

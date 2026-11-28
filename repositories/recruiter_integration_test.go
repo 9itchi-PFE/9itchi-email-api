@@ -59,13 +59,13 @@ func TestRecruiterRepository(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound, "another student's recruiter")
 
 	time.Sleep(10 * time.Millisecond)
-	_, _, err = repo.SaveSearch(ctx, &db.RecruiterSearch{UserID: user, Query: []byte(`{}`), QueryHash: strings.Repeat("e", 64), Provider: "fake"}, []db.Recruiter{
+	_, _, err = repo.SaveSearch(ctx, &db.RecruiterSearch{UserID: user, Query: []byte(`{}`), QueryHash: strings.Repeat("e", 64), Provider: "fake", Credits: 2}, []db.Recruiter{
 		{DedupeKey: "a@x.example", Name: "Amine Sassi", Title: "HR Manager", Email: "a@x.example", Confidence: 75},
 	})
 	require.NoError(t, err)
 	n, err := repo.CountSearchesSince(ctx, user, since)
 	require.NoError(t, err)
-	assert.Equal(t, 2, n)
+	assert.Equal(t, 3, n, "credits summed: 1 (not set) + 2")
 
 	all, err := repo.List(ctx, user, 200)
 	require.NoError(t, err)
@@ -78,5 +78,5 @@ func TestRecruiterRepository(t *testing.T) {
 	})
 	assert.Error(t, err, "confidence above 100 is refused")
 	n, _ = repo.CountSearchesSince(ctx, user, since)
-	assert.Equal(t, 2, n, "and the search with it: one transaction")
+	assert.Equal(t, 3, n, "and the search with it: one transaction")
 }
