@@ -36,16 +36,20 @@ type AppConfig struct {
 	// TrackerPublicURL is the public base URL of the tracking pixel (opened by the recipient's mail client).
 	TrackerPublicURL string
 	// RecruiterChain is the contact finders of Recruiter Radar, in order (env RECRUITER_CHAIN, default
-	// "website,hunter,apollo"; names registered in pkg/recruiters, an unknown one fails startup). CompanyDiscovery is the
+	// "website,hunter,apollo,quickenrich"; names registered in pkg/recruiters, an unknown one fails startup). CompanyDiscovery is the
 	// company discoverers (env COMPANY_DISCOVERY, default "hunter"; empty = none). A source without its key is skipped.
 	RecruiterChain   []string
 	CompanyDiscovery []string
-	// HunterAPIKey and ApolloAPIKey are the providers' keys (a token an admin set in statistics-api wins). Never log them.
-	HunterAPIKey string
-	ApolloAPIKey string
-	// HunterMonthlyCap (searches) and ApolloMonthlyCap (reveals) cap the credits spent per UTC month (default 50 each).
-	HunterMonthlyCap int
-	ApolloMonthlyCap int
+	// HunterAPIKey, ApolloAPIKey and QuickEnrichAPIKey are the providers' keys (a token an admin set in
+	// statistics-api wins). Never log them.
+	HunterAPIKey      string
+	ApolloAPIKey      string
+	QuickEnrichAPIKey string
+	// HunterMonthlyCap (searches), ApolloMonthlyCap (reveals) and QuickEnrichMonthlyCap (domain searches) cap the
+	// credits spent per UTC month (default 50 each).
+	HunterMonthlyCap      int
+	ApolloMonthlyCap      int
+	QuickEnrichMonthlyCap int
 	// StatisticsAPIURL is the admin credit tracker (empty = off).
 	StatisticsAPIURL string
 }
@@ -74,12 +78,14 @@ func LoadConfig() AppConfig {
 		GoogleRedirectURL:      getStringWithDefault("GMAIL_REDIRECT_URL", "http://localhost:8085/gmail/callback"),
 		ClientURL:              getStringWithDefault("CLIENT_URL", "http://localhost:3000"),
 		TrackerPublicURL:       getStringWithDefault("TRACKER_PUBLIC_URL", "http://localhost:8086"),
-		RecruiterChain:         getListWithDefault("RECRUITER_CHAIN", "website,hunter,apollo"),
+		RecruiterChain:         getListWithDefault("RECRUITER_CHAIN", "website,hunter,apollo,quickenrich"),
 		CompanyDiscovery:       getListWithDefault("COMPANY_DISCOVERY", "hunter"),
 		HunterAPIKey:           getStringWithDefault("HUNTER_API_KEY", ""),
 		ApolloAPIKey:           getStringWithDefault("APOLLO_API_KEY", ""),
+		QuickEnrichAPIKey:      getStringWithDefault("QUICK_ENRICH_KEY", ""),
 		HunterMonthlyCap:       getIntWithDefault("HUNTER_MONTHLY_CAP", 50),
 		ApolloMonthlyCap:       getIntWithDefault("APOLLO_MONTHLY_CAP", 50),
+		QuickEnrichMonthlyCap:  getIntWithDefault("QUICK_ENRICH_MONTHLY_CAP", 50),
 		StatisticsAPIURL:       getStringWithDefault("STATISTICS_API_URL", "http://9itchi-statistics-api:8090"),
 	}
 }
@@ -110,6 +116,9 @@ func (c AppConfig) Validate() error {
 	}
 	if c.ApolloMonthlyCap < 0 {
 		bad = append(bad, "APOLLO_MONTHLY_CAP (min 0)")
+	}
+	if c.QuickEnrichMonthlyCap < 0 {
+		bad = append(bad, "QUICK_ENRICH_MONTHLY_CAP (min 0)")
 	}
 	if len(bad) > 0 {
 		return fmt.Errorf("required environment variables are missing or invalid: %s", strings.Join(bad, ", "))

@@ -18,7 +18,7 @@ const (
 )
 
 // poolSources are the contact sources by_source always lists (0 when none).
-var poolSources = []string{"website", "hunter", "apollo", "offer", "import"}
+var poolSources = []string{"website", "hunter", "apollo", "quickenrich", "offer", "import"}
 
 // PoolStatsService gives the admin numbers of the shared prospect pool. Handlers stay thin.
 type PoolStatsService interface {

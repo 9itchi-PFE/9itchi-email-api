@@ -69,7 +69,7 @@ func TestPoolStats(t *testing.T) {
 
 	assert.Equal(t, 12, out.Pool.Companies)
 	assert.Equal(t, 25, out.Pool.Fresh)
-	assert.Equal(t, map[string]int{"website": 0, "hunter": 20, "apollo": 0, "offer": 0, "import": 0, "fake": 1}, out.Pool.BySource,
+	assert.Equal(t, map[string]int{"website": 0, "hunter": 20, "apollo": 0, "quickenrich": 0, "offer": 0, "import": 0, "fake": 1}, out.Pool.BySource,
 		"every source listed")
 
 	assert.Equal(t, 3, out.Last30Days.ContactsShown)
@@ -105,7 +105,7 @@ func TestPoolStatsEmpty(t *testing.T) {
 	require.Len(t, out.Daily, 31)
 	assert.Equal(t, time.Now().UTC().Format(time.DateOnly), out.Daily[30].Day)
 	assert.Equal(t, map[string]int{"hunter": 0}, out.Daily[30].Credits)
-	assert.Len(t, out.Pool.BySource, 5)
+	assert.Len(t, out.Pool.BySource, 6)
 }
 
 func TestPoolStatsRepositoryError(t *testing.T) {
