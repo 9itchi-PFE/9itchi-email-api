@@ -159,6 +159,9 @@ func (c *Client) Send(ctx context.Context, accessToken string, msg core.MailMess
 	if err != nil {
 		return err
 	}
+	if len(raw) > core.MaxMailBytes {
+		return core.ErrMailTooLarge
+	}
 	body, _ := json.Marshal(map[string]string{"raw": base64.RawURLEncoding.EncodeToString(raw)})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.SendURL, bytes.NewReader(body))
 	if err != nil {
@@ -190,8 +193,8 @@ func NewState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// BuildMIME builds the RFC 5322 message: HTML body, plus the PDF as a base64 attachment when present.
-// Header values never contain line breaks (header injection).
+// BuildMIME builds the RFC 5322 message: HTML body, plus each attachment as a base64 part, in order.
+// Header values never contain line breaks (header injection); file names lose them, and their quotes.
 func BuildMIME(m core.MailMessage) ([]byte, error) {
 	for _, v := range []string{m.From, m.To, m.Subject} {
 		if strings.ContainsAny(v, "\r\n") {
@@ -201,7 +204,7 @@ func BuildMIME(m core.MailMessage) ([]byte, error) {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\n", m.From, m.To, mime.QEncoding.Encode("utf-8", m.Subject))
 	html := base64Lines([]byte(m.HTML))
-	if m.Attachment == nil {
+	if len(m.Attachments) == 0 {
 		fmt.Fprintf(&b, "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", html)
 		return b.Bytes(), nil
 	}
@@ -209,21 +212,41 @@ func BuildMIME(m core.MailMessage) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := mime.QEncoding.Encode("utf-8", strings.NewReplacer("\r", "", "\n", "", "\"", "").Replace(m.Attachment.Filename))
 	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", boundary)
 	fmt.Fprintf(&b, "--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n", boundary, html)
-	// The type comes from resume-api, which only stores PDF and DOCX; anything unexpected is sent as a plain file.
-	ctype := "application/pdf"
-	if t := m.Attachment.ContentType; t != "" {
-		if parsed, _, err := mime.ParseMediaType(t); err == nil {
-			ctype = parsed
-		} else {
-			ctype = "application/octet-stream"
+	for _, a := range m.Attachments {
+		clean := cleanFilename(a.Filename)
+		name := mime.QEncoding.Encode("utf-8", clean)
+		disposition := fmt.Sprintf("attachment; filename=\"%s\"", name)
+		if name != clean {
+			// Q-encoded name for older readers, RFC 2231 UTF-8 name for the others (Gmail, Outlook).
+			disposition += "; filename*=UTF-8''" + percentEncode(clean)
 		}
+		// The type comes from resume-api, which only stores PDF and DOCX; anything unexpected is sent as a plain file.
+		ctype := "application/pdf"
+		if t := a.ContentType; t != "" {
+			if parsed, _, err := mime.ParseMediaType(t); err == nil {
+				ctype = parsed
+			} else {
+				ctype = "application/octet-stream"
+			}
+		}
+		fmt.Fprintf(&b, "--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: %s\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n",
+			boundary, ctype, name, disposition, base64Lines(a.Data))
 	}
-	fmt.Fprintf(&b, "--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n",
-		boundary, ctype, name, name, base64Lines(m.Attachment.Data), boundary)
+	fmt.Fprintf(&b, "--%s--\r\n", boundary)
 	return b.Bytes(), nil
+}
+
+// cleanFilename drops what could break the header out of a file name: control characters (line breaks), quotes
+// and backslashes.
+func cleanFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == '"' || r == '\\' {
+			return -1
+		}
+		return r
+	}, name)
 }
 
 func base64Lines(data []byte) string {
@@ -234,5 +257,19 @@ func base64Lines(data []byte) string {
 		enc = enc[76:]
 	}
 	b.WriteString(enc + "\r\n")
+	return b.String()
+}
+
+// percentEncode is the RFC 5987 value of a UTF-8 file name: attr-chars as they are, other bytes as %XX.
+func percentEncode(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("!#$&+-.^_`|~", c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
 	return b.String()
 }

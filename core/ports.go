@@ -16,7 +16,12 @@ var (
 	// ErrPeerUnprocessable means a peer service answered 422: it understood the request and cannot do it (an offer
 	// link it cannot read).
 	ErrPeerUnprocessable = errors.New("peer could not process the request")
+	// ErrMailTooLarge means the message, attachments included, is larger than Gmail accepts.
+	ErrMailTooLarge = errors.New("message larger than gmail allows")
 )
+
+// MaxMailBytes is the largest message Gmail accepts (25 MB), attachments included.
+const MaxMailBytes = 25 << 20
 
 // Keys of the payments plan quotas read here.
 const (
@@ -54,13 +59,13 @@ type Attachment struct {
 	Data        []byte
 }
 
-// MailMessage is one outgoing email: an HTML body and an optional PDF.
+// MailMessage is one outgoing email: an HTML body and its files (the CV, the cover letter), in that order.
 type MailMessage struct {
-	From       string
-	To         string
-	Subject    string
-	HTML       string
-	Attachment *Attachment
+	From        string
+	To          string
+	Subject     string
+	HTML        string
+	Attachments []Attachment
 }
 
 // Mailer is the Google side: OAuth2 and the Gmail send API.
@@ -122,10 +127,31 @@ type JobSource interface {
 type ResumeSource interface {
 	// Summary is a short plain-text version of the CV.
 	Summary(ctx context.Context, bearer, id string) (string, error)
-	// PDF is the latest exported PDF of the CV, nil when none was exported.
-	PDF(ctx context.Context, id string) ([]byte, error)
+	// PDF is the CV as a PDF, named by resume-api after the CV's title (CV.pdf when it gives no name); nil when
+	// the CV does not exist.
+	PDF(ctx context.Context, id string) (*Attachment, error)
 	// Original is the file the student imported for the CV, as it came; nil when the CV has none.
 	Original(ctx context.Context, id string) (*Attachment, error)
+	// Names reads the title of a CV of the user and the name on it.
+	Names(ctx context.Context, bearer, id string) (*ResumeNames, error)
+	// LetterPDF renders a cover letter as a PDF.
+	LetterPDF(ctx context.Context, in LetterRequest) ([]byte, error)
+}
+
+// ResumeNames are the title the student gave a CV and the name in its contact block.
+type ResumeNames struct {
+	Title       string
+	ContactName string
+}
+
+// LetterRequest is the cover letter resume-api renders: the body and subject of the email, in Language (fr, en,
+// ar), signed with the contact block of ResumeID (none when empty) and SenderEmail.
+type LetterRequest struct {
+	ResumeID    string
+	Language    string
+	Subject     string
+	Body        string
+	SenderEmail string
 }
 
 // Tracker calls 9itchi-tracker-api.

@@ -60,6 +60,8 @@ type EmailService interface {
 	// SendFollowUp sends a follow-up from the student's Gmail: part of the subscription, counted in the month's
 	// emails, never with a CV
 	SendFollowUp(ctx context.Context, userID string, req api.SendEmailRequest) (*db.Email, *models.ApiError)
+	// GET /emails/attachment-names: the name of the CV file and the default name of the cover letter
+	AttachmentNames(ctx context.Context, userID string, q api.AttachmentNamesQuery) (*api.AttachmentNamesResponse, *models.ApiError)
 }
 
 // EmailDeps are the collaborators of the email service (all mockable).
@@ -303,14 +305,69 @@ func (s *emailService) create(ctx context.Context, userID string, req api.SendEm
 			return nil, apiErr
 		}
 	}
+	attachLetter := req.AttachLetter == nil || *req.AttachLetter
+	letterName := optional(cleanStem(req.LetterFilename, ""))
+	if attachLetter && letterName != nil && req.ResumeID != "" {
+		if apiErr := s.checkLetterName(ctx, userID, req.ResumeID, *letterName); apiErr != nil {
+			return nil, apiErr
+		}
+	}
+	language := letterLanguage(req.Language, req.Body)
 	e, err := s.Repo.Create(ctx, &db.Email{
 		UserID: userID, JobID: optional(req.JobID), ResumeID: optional(req.ResumeID), Recipient: req.To,
 		Subject: strings.TrimSpace(req.Subject), Body: req.Body, Status: status, ScheduledAt: at, CVOriginal: original,
+		LetterFilename: letterName, AttachLetter: attachLetter, LetterLanguage: &language,
 	})
 	if err != nil {
 		return nil, repoError(err, "email not found")
 	}
 	return e, nil
+}
+
+// checkLetterName refuses a cover letter named like the CV it leaves with: the recruiter would get two files with
+// the same name. A CV that cannot be read now is not checked (the send says so when it leaves).
+func (s *emailService) checkLetterName(ctx context.Context, userID, resumeID, letterStem string) *models.ApiError {
+	token, err := s.bearer(userID)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal error")
+	}
+	names, err := s.Resumes.Names(ctx, token, resumeID)
+	if errors.Is(err, core.ErrPeerNotFound) {
+		return apiError(http.StatusNotFound, "resume not found")
+	}
+	if err != nil || names == nil {
+		utils.Logger.Logger.Warnw("email: CV name unavailable, letter name not checked", "error", err)
+		return nil
+	}
+	if strings.EqualFold(letterStem, cvStem(names.Title, names.ContactName)) {
+		return apiError(http.StatusBadRequest, "letter_filename must differ from the CV name")
+	}
+	return nil
+}
+
+// AttachmentNames gives the composer the names the files will have: the CV's (resume-api names it after its title)
+// and the default name of the cover letter in that language. A CV that cannot be read now gives generic names.
+func (s *emailService) AttachmentNames(ctx context.Context, userID string, q api.AttachmentNamesQuery) (*api.AttachmentNamesResponse, *models.ApiError) {
+	language := letterLanguage(q.Language, "")
+	if q.ResumeID == "" {
+		return &api.AttachmentNamesResponse{LetterFilename: defaultLetterStem(language, "")}, nil
+	}
+	token, err := s.bearer(userID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal error")
+	}
+	names, err := s.Resumes.Names(ctx, token, q.ResumeID)
+	if errors.Is(err, core.ErrPeerNotFound) {
+		return nil, apiError(http.StatusNotFound, "resume not found")
+	}
+	if err != nil || names == nil {
+		utils.Logger.Logger.Warnw("email: CV names unavailable, generic attachment names", "error", err)
+		return &api.AttachmentNamesResponse{CVFilename: "CV.pdf", LetterFilename: defaultLetterStem(language, "")}, nil
+	}
+	return &api.AttachmentNamesResponse{
+		CVFilename:     cvStem(names.Title, names.ContactName) + ".pdf",
+		LetterFilename: defaultLetterStem(language, names.ContactName),
+	}, nil
 }
 
 // checkAttachable makes sure the CV has an imported file, for an email that must carry it. Said now, while the
@@ -483,11 +540,22 @@ func (s *emailService) deliver(ctx context.Context, id string, scheduled bool) (
 			}
 			return fail(apiError(http.StatusBadGateway, "the CV could not be attached"), err)
 		}
-		msg.Attachment = att
+		msg.Attachments = append(msg.Attachments, *att)
+	}
+	if e.AttachLetter {
+		// Same rule for the letter the student asked to attach.
+		letter, err := s.letter(ctx, e, from)
+		if err != nil {
+			return fail(apiError(http.StatusBadGateway, "the cover letter could not be attached"), err)
+		}
+		msg.Attachments = append(msg.Attachments, *letter)
 	}
 	if err := s.Mailer.Send(ctx, accessToken, msg); err != nil {
 		if errors.Is(err, core.ErrGmailAuth) {
 			return fail(apiError(http.StatusConflict, "gmail access was revoked, reconnect gmail"), err)
+		}
+		if errors.Is(err, core.ErrMailTooLarge) {
+			return fail(apiError(http.StatusUnprocessableEntity, "the attachments are larger than Gmail allows (25 MB)"), err)
 		}
 		return fail(apiError(http.StatusBadGateway, "gmail could not send the email"), err)
 	}
@@ -514,10 +582,61 @@ func (s *emailService) attachment(ctx context.Context, e *db.Email) (*core.Attac
 		return s.Resumes.Original(ctx, *e.ResumeID)
 	}
 	pdf, err := s.Resumes.PDF(ctx, *e.ResumeID)
-	if err != nil || len(pdf) == 0 {
+	if err != nil || pdf == nil || len(pdf.Data) == 0 {
 		return nil, err
 	}
-	return &core.Attachment{Filename: "CV.pdf", Data: pdf}, nil
+	if pdf.Filename == "" {
+		pdf.Filename = "CV.pdf"
+	}
+	return pdf, nil
+}
+
+// letter is the cover letter of an email as a PDF, rendered now by resume-api from the email as it leaves, signed
+// with the CV's contact block and the Gmail address it leaves from. Its name is the one the student gave, else the
+// default one of its language.
+func (s *emailService) letter(ctx context.Context, e *db.Email, from string) (*core.Attachment, error) {
+	asked := ""
+	if e.LetterLanguage != nil {
+		asked = *e.LetterLanguage
+	}
+	language := letterLanguage(asked, e.Body)
+	in := core.LetterRequest{Language: language, Subject: e.Subject, Body: e.Body, SenderEmail: from}
+	if e.ResumeID != nil {
+		in.ResumeID = *e.ResumeID
+	}
+	data, err := s.Resumes.LetterPDF(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, errors.New("empty letter")
+	}
+	stem := ""
+	if e.LetterFilename != nil {
+		stem = *e.LetterFilename
+	}
+	if stem == "" {
+		stem = s.defaultLetterName(ctx, e, language)
+	}
+	return &core.Attachment{Filename: stem + ".pdf", ContentType: "application/pdf", Data: data}, nil
+}
+
+// defaultLetterName is the default name of the letter with the name on the CV; without a CV, or when it cannot be
+// read, the prefix of the language alone.
+func (s *emailService) defaultLetterName(ctx context.Context, e *db.Email, language string) string {
+	if e.ResumeID == nil {
+		return defaultLetterStem(language, "")
+	}
+	token, err := s.bearer(e.UserID)
+	if err != nil {
+		return defaultLetterStem(language, "")
+	}
+	names, err := s.Resumes.Names(ctx, token, *e.ResumeID)
+	if err != nil || names == nil {
+		utils.Logger.Logger.Warnw("email: CV name unavailable, generic letter name", "email_id", e.ID, "error", err)
+		return defaultLetterStem(language, "")
+	}
+	return defaultLetterStem(language, names.ContactName)
 }
 
 // renderHTML turns the plain-text body into HTML (escaped) and appends the tracking pixel.
@@ -556,6 +675,7 @@ func (s *emailService) UpdateEmail(ctx context.Context, userID, id string, req a
 	edit := db.EmailEdit{
 		Recipient: e.Recipient, Subject: e.Subject, Body: e.Body, ResumeID: e.ResumeID,
 		ScheduledAt: e.ScheduledAt, ScheduleTaskID: e.ScheduleTaskID,
+		LetterFilename: e.LetterFilename, AttachLetter: e.AttachLetter, LetterLanguage: e.LetterLanguage,
 	}
 
 	if req.To != nil && !strings.EqualFold(strings.TrimSpace(*req.To), e.Recipient) {
@@ -605,6 +725,22 @@ func (s *emailService) UpdateEmail(ctx context.Context, userID, id string, req a
 				}
 			}
 			edit.ResumeID = resumeID
+		}
+	}
+
+	if req.LetterFilename != nil {
+		edit.LetterFilename = optional(cleanStem(*req.LetterFilename, ""))
+	}
+	if req.AttachLetter != nil {
+		edit.AttachLetter = *req.AttachLetter
+	}
+	if req.Language != nil {
+		edit.LetterLanguage = optional(*req.Language)
+	}
+	letterChanged := req.LetterFilename != nil || req.AttachLetter != nil || attach != nil
+	if letterChanged && edit.AttachLetter && edit.LetterFilename != nil && edit.ResumeID != nil {
+		if apiErr := s.checkLetterName(ctx, userID, *edit.ResumeID, *edit.LetterFilename); apiErr != nil {
+			return nil, apiErr
 		}
 	}
 

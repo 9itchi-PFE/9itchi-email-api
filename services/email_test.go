@@ -174,6 +174,7 @@ func (m *memEmails) UpdateScheduled(_ context.Context, userID, id string, edit d
 	}
 	e.Recipient, e.Subject, e.Body, e.ResumeID = edit.Recipient, edit.Subject, edit.Body, edit.ResumeID
 	e.ScheduledAt, e.ScheduleTaskID = edit.ScheduledAt, edit.ScheduleTaskID
+	e.LetterFilename, e.AttachLetter, e.LetterLanguage = edit.LetterFilename, edit.AttachLetter, edit.LetterLanguage
 	c := *e
 	return &c, nil
 }
@@ -209,10 +210,41 @@ func (f fakeTracker) Register(context.Context, string, string) (string, string, 
 
 type fakeResumes struct {
 	pdf []byte
-	err error
+	// pdfName is the name resume-api gives the CV ("": none given).
+	pdfName string
+	err     error
 	// original is the imported file; originalErr fails its read.
 	original    *core.Attachment
 	originalErr error
+	// names is what Names gives (nil: defaultNames); namesErr fails it.
+	names    *core.ResumeNames
+	namesErr error
+	// letterErr fails the cover letter; letters, when set, records what was asked.
+	letterErr error
+	letters   *[]core.LetterRequest
+}
+
+var defaultNames = core.ResumeNames{Title: "Développeuse React", ContactName: "Ines Ben Salah"}
+
+func (f fakeResumes) Names(context.Context, string, string) (*core.ResumeNames, error) {
+	if f.namesErr != nil {
+		return nil, f.namesErr
+	}
+	if f.names != nil {
+		return f.names, nil
+	}
+	n := defaultNames
+	return &n, nil
+}
+
+func (f fakeResumes) LetterPDF(_ context.Context, in core.LetterRequest) ([]byte, error) {
+	if f.letters != nil {
+		*f.letters = append(*f.letters, in)
+	}
+	if f.letterErr != nil {
+		return nil, f.letterErr
+	}
+	return []byte("%PDF letter"), nil
 }
 
 func (f fakeResumes) Original(context.Context, string) (*core.Attachment, error) {
@@ -222,7 +254,12 @@ func (f fakeResumes) Original(context.Context, string) (*core.Attachment, error)
 func (f fakeResumes) Summary(context.Context, string, string) (string, error) {
 	return "Ines, ENIS", nil
 }
-func (f fakeResumes) PDF(context.Context, string) ([]byte, error) { return f.pdf, f.err }
+func (f fakeResumes) PDF(context.Context, string) (*core.Attachment, error) {
+	if f.err != nil || f.pdf == nil {
+		return nil, f.err
+	}
+	return &core.Attachment{Filename: f.pdfName, ContentType: "application/pdf", Data: f.pdf}, nil
+}
 
 type fakeJobs struct {
 	err  error
@@ -428,7 +465,7 @@ func TestSendEmail(t *testing.T) {
 	require.Len(t, h.mailer.sent, 1)
 	m := h.mailer.sent[0]
 	assert.Equal(t, "hr@acme.tn", m.To)
-	assert.NotNil(t, m.Attachment)
+	assert.Len(t, m.Attachments, 2, "the CV and the cover letter")
 	assert.Contains(t, m.HTML, "&lt;b&gt;<br>Bonjour")
 	assert.Contains(t, m.HTML, "http://tracker/t/track-1")
 	assert.Equal(t, db.EmailSent, h.repo.rows[e.ID].Status)
@@ -631,7 +668,7 @@ func TestSendEmailNeverLeavesWithoutItsCV(t *testing.T) {
 		_, apiErr = svc.SendEmail(context.Background(), uid, req)
 		require.Nil(t, apiErr, name)
 		require.Len(t, h.mailer.sent, 1, name)
-		assert.Nil(t, h.mailer.sent[0].Attachment, name)
+		assert.Len(t, h.mailer.sent[0].Attachments, 1, name+": the letter only")
 	}
 }
 
@@ -700,8 +737,8 @@ func TestSendWithoutSubscriptionCarriesTheImportedFile(t *testing.T) {
 	assert.Equal(t, db.EmailSent, e.Status)
 	assert.True(t, e.CVOriginal)
 	require.Len(t, h.mailer.sent, 1)
-	att := h.mailer.sent[0].Attachment
-	require.NotNil(t, att)
+	require.Len(t, h.mailer.sent[0].Attachments, 2)
+	att := h.mailer.sent[0].Attachments[0]
 	assert.Equal(t, "cv-ines.docx", att.Filename)
 	assert.Equal(t, []byte("as imported"), att.Data, "the CV built in 9itchi is not sent without a subscription")
 	assert.Contains(t, att.ContentType, "wordprocessingml")
@@ -729,7 +766,7 @@ func TestSendWithoutSubscriptionCarriesTheImportedFile(t *testing.T) {
 	out, apiErr := dispatchAt(h.svc, at, s.ID)
 	require.Nil(t, apiErr)
 	assert.Equal(t, db.EmailSent, out.Status)
-	assert.Equal(t, []byte("as imported"), h.mailer.sent[1].Attachment.Data)
+	assert.Equal(t, []byte("as imported"), h.mailer.sent[1].Attachments[0].Data)
 }
 
 func TestSendWithoutSubscriptionNeedsAnImportedFile(t *testing.T) {
@@ -752,8 +789,8 @@ func TestSubscriberStillSendsTheBuiltCV(t *testing.T) {
 	e, apiErr := h.svc.SendEmail(context.Background(), uid, sendReq())
 	require.Nil(t, apiErr)
 	assert.False(t, e.CVOriginal)
-	assert.Equal(t, "CV.pdf", h.mailer.sent[0].Attachment.Filename)
-	assert.Equal(t, []byte("%PDF built in 9itchi"), h.mailer.sent[0].Attachment.Data)
+	assert.Equal(t, "CV.pdf", h.mailer.sent[0].Attachments[0].Filename)
+	assert.Equal(t, []byte("%PDF built in 9itchi"), h.mailer.sent[0].Attachments[0].Data)
 }
 
 func TestAllowance(t *testing.T) {

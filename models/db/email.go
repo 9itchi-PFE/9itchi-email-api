@@ -17,6 +17,12 @@ type Email struct {
 	TrackingID  string     `db:"tracking_id" json:"tracking_id"`
 	// CVOriginal: the attachment is the file the student imported (an application without a subscription).
 	CVOriginal bool `db:"cv_original" json:"cv_original"`
+	// LetterFilename is the name of the cover letter PDF without extension (nil: the default name, read when the
+	// email leaves). AttachLetter says the letter leaves as a PDF too; LetterLanguage is its language (nil: read
+	// from the body).
+	LetterFilename *string `db:"letter_filename" json:"letter_filename"`
+	AttachLetter   bool    `db:"attach_letter" json:"attach_letter"`
+	LetterLanguage *string `db:"letter_language" json:"letter_language"`
 	// ScheduleTaskID is the schedule-api task to cancel with a scheduled email.
 	ScheduleTaskID *string   `db:"schedule_task_id" json:"-"`
 	CreatedAt      time.Time `db:"created_at" json:"created_at"`
@@ -40,4 +46,7 @@ type EmailEdit struct {
 	ResumeID       *string
 	ScheduledAt    *time.Time
 	ScheduleTaskID *string
+	LetterFilename *string
+	AttachLetter   bool
+	LetterLanguage *string
 }
