@@ -14,7 +14,7 @@ Applications from the student's own Gmail: OAuth (send-only), AI letter draft, A
 ## Routes
 - Public: `GET /gmail/callback` (state = signed `gmail_state`, 10 min TTL).
 - User: `GET /gmail/connect|status`, `DELETE /gmail/connection`; `POST /emails/draft`, `POST /emails`, `POST /emails/schedule`, `GET /emails`, `GET /emails/attachment-names`, `POST /emails/draft-from-link`, `/emails/:id` GET|PATCH (edit scheduled)|DELETE (cancel); `/applications` POST|GET, `GET /applications/allowance`, `/applications/match` POST|GET, `/applications/scores` POST|GET, `PATCH /applications/:id`, `POST /applications/:id/send`, `POST /applications/:id/follow-up/draft`, `POST /applications/:id/follow-up`; `POST /recruiters/search`, `POST /recruiters/company`, `GET /recruiters`, `GET /recruiters/allowance`, `POST /recruiters/:id/draft`.
-- Admin: `GET /admin/users/:id/applications|gmail|sent-with-cv`, `GET /admin/prospects/stats` (pool counts, 30-day pool hit rates, 31 zero-filled UTC days of searches and provider credits).
+- Admin: `GET /admin/users/:id/applications|gmail|sent-with-cv|usage` (`usage` = limit + used for applications, AI letters, analyses, scores, recruiter searches, counted like the enforcement; `UsageService`), `GET /admin/prospects/stats` (pool counts, 30-day pool hit rates, 31 zero-filled UTC days of searches and provider credits).
 - Internal: `DELETE /internal/users/:id`, `POST /internal/emails/:id/dispatch` (schedule-api), `GET /internal/emails/:id/context` (notification-api).
 
 ## Data, peers, events

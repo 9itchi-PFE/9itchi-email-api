@@ -122,6 +122,19 @@ func UserBuiltSends(svc services.EmailService) gin.HandlerFunc {
 	}
 }
 
+// UserUsage: GET /admin/users/:id/usage (admin) how much of the plan a student used: applications, AI letters,
+// analyses and scores, recruiter searches.
+func UserUsage(svc services.UsageService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		result, apiErr := svc.UserUsage(c.Request.Context(), c.Param("id"))
+		if apiErr != nil {
+			models.FormatError(c, apiErr)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 // DraftFromLink: POST /emails/draft-from-link (user) AI draft for an offer given by its link.
 func DraftFromLink(svc services.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {

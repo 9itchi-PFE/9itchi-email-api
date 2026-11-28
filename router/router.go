@@ -68,6 +68,7 @@ func initializeRoutes(r *gin.Engine, services *services.Services) {
 		adminGroup.GET("/admin/users/:id/applications", handlers.UserApplications(services.Application))
 		adminGroup.GET("/admin/users/:id/gmail", handlers.UserGmailStatus(services.Gmail))
 		adminGroup.GET("/admin/users/:id/sent-with-cv", handlers.UserBuiltSends(services.Email))
+		adminGroup.GET("/admin/users/:id/usage", handlers.UserUsage(services.Usage))
 		adminGroup.GET("/admin/prospects/stats", handlers.ProspectStats(services.PoolStats))
 	}
 
